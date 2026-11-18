@@ -19,7 +19,7 @@ app.use(express.json({ limit: '10mb' }));
 // -----------------------------------------------------------------------------
 // Local JSON Storage Fallback (Runs if MongoDB is not running or unreachable)
 // -----------------------------------------------------------------------------
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.VERCEL ? '/tmp' : path.join(__dirname, 'data');
 const LOCAL_DB_PATH = path.join(DATA_DIR, 'local_db.json');
 
 if (!fs.existsSync(DATA_DIR)) {
@@ -1246,11 +1246,15 @@ if (fs.existsSync(clientDist)) {
 // -----------------------------------------------------------------------------
 // Start Server
 // -----------------------------------------------------------------------------
-app.listen(PORT, () => {
-  console.log(`=======================================================`);
-  console.log(`✈️  Flight Desk Fullstack Backend running on port ${PORT}`);
-  console.log(`📡 MongoDB Status: ${mongoStatus.mode} (${mongoStatus.connected ? 'CONNECTED' : 'LOCAL FALLBACK'})`);
-  console.log(`🗺️  VATSIM Radar & Pilot Telemetry Ready`);
-  console.log(`📋 Logbooks Module Connected`);
-  console.log(`=======================================================`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`=======================================================`);
+    console.log(`✈️  Flight Desk Fullstack Backend running on port ${PORT}`);
+    console.log(`📡 MongoDB Status: ${mongoStatus.mode} (${mongoStatus.connected ? 'CONNECTED' : 'LOCAL FALLBACK'})`);
+    console.log(`🗺️  VATSIM Radar & Pilot Telemetry Ready`);
+    console.log(`📋 Logbooks Module Connected`);
+    console.log(`=======================================================`);
+  });
+}
+
+module.exports = app;
