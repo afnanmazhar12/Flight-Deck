@@ -233,6 +233,25 @@ process.on('uncaughtException', (err) => {
 
 let connectingPromise = null;
 
+
+async function syncLocalToMongo() {
+  try {
+    // Sync any local flights, fleet, and logbooks into MongoDB
+    for (const flt of Object.values(localStore.flights)) {
+      await Flight.findOneAndUpdate({ id: flt.id }, flt, { upsert: true });
+    }
+    for (const ac of Object.values(localStore.fleet)) {
+      await Fleet.findOneAndUpdate({ id: ac.id }, ac, { upsert: true });
+    }
+    for (const log of Object.values(localStore.logbooks)) {
+      await Logbook.findOneAndUpdate({ id: log.id }, log, { upsert: true });
+    }
+    console.log('[MongoDB] Local store synced to MongoDB.');
+  } catch (err) {
+    console.error('[MongoDB] Sync error:', err.message);
+  }
+}
+
 async function connectToMongo(uri) {
   const targetUri = uri || mongoStatus.uri || DEFAULT_MONGO_URI;
   mongoStatus.lastAttempt = new Date().toISOString();
