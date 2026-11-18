@@ -1,0 +1,17 @@
+{
+  "name": "flightdesk-app",
+  "version": "1.0.0",
+  "description": "Fullstack Flight Planning, SimBrief, VATSIM Radar & Logbook Desk with MongoDB",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix client install && npm --prefix client run build && npm --prefix server install",
+    "start": "node server/index.js",
+    "dev:server": "node server/index.js",
+    "dev:client": "npm --prefix client run dev",
+    "dev": "concurrently -k \"node server/index.js\" \"npm --prefix client run dev\"",
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install"
+  },
+  "dependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

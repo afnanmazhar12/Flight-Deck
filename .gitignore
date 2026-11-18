@@ -1,0 +1,14 @@
+node_modules
+client/node_modules
+server/node_modules
+client/dist
+.env
+*.env
+.env.*
+check_atlas.js
+.DS_Store
+Thumbs.db
+server/data/local_db.json
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
