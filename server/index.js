@@ -208,9 +208,11 @@ seedInitialFleet();
 // -----------------------------------------------------------------------------
 // MongoDB Connection Handling with Dynamic Reconnect
 // -----------------------------------------------------------------------------
+const DEFAULT_MONGO_URI = 'mongodb+srv://mafnanmazhar_db_user:yYcQyEH8z7K9ohqk@cluster0.1uqar4p.mongodb.net/flightdesk?retryWrites=true&w=majority';
+
 let mongoStatus = {
   connected: false,
-  uri: process.env.MONGODB_URI || localStore.settings.mongoUri || 'mongodb://127.0.0.1:27017/flightdesk',
+  uri: process.env.MONGODB_URI || localStore.settings.mongoUri || DEFAULT_MONGO_URI,
   host: null,
   database: null,
   mode: 'local-fallback',
@@ -229,15 +231,22 @@ process.on('uncaughtException', (err) => {
   console.error('[Process] Handled uncaught exception:', err.message);
 });
 
+let connectingPromise = null;
+
 async function connectToMongo(uri) {
-  const targetUri = uri || mongoStatus.uri;
+  const targetUri = uri || mongoStatus.uri || DEFAULT_MONGO_URI;
   mongoStatus.lastAttempt = new Date().toISOString();
   try {
+    if (mongoose.connection.readyState === 1) {
+      mongoStatus.connected = true;
+      mongoStatus.mode = 'mongodb';
+      return { success: true, message: 'Already connected', host: mongoose.connection.host };
+    }
     if (mongoose.connection.readyState !== 0) {
       await mongoose.disconnect();
     }
     await mongoose.connect(targetUri, {
-      serverSelectionTimeoutMS: 3000
+      serverSelectionTimeoutMS: 8000
     });
     mongoStatus.connected = true;
     mongoStatus.uri = targetUri;
@@ -259,26 +268,22 @@ async function connectToMongo(uri) {
   }
 }
 
-// Sync local store items into MongoDB when connection is established
-async function syncLocalToMongo() {
-  if (!mongoStatus.connected) return;
-  try {
-    for (const plane of Object.values(localStore.fleet)) {
-      await Fleet.findOneAndUpdate({ id: plane.id }, plane, { upsert: true, new: true });
-    }
-    for (const flt of Object.values(localStore.flights)) {
-      if (typeof flt.ac === 'string' || !flt.ac || !flt.ac.reg) {
-        flt.ac = aircraftSnap(localStore.fleet[flt.ac] || Object.values(localStore.fleet)[0]);
-      }
-      await Flight.findOneAndUpdate({ id: flt.id }, flt, { upsert: true, new: true });
-    }
-    for (const log of Object.values(localStore.logbooks)) {
-      await Logbook.findOneAndUpdate({ id: log.id }, log, { upsert: true, new: true });
-    }
-    console.log('[MongoDB] Synced fleet, flights and logbooks to MongoDB');
-  } catch (e) {
-    console.error('[MongoDB] Error syncing to Mongo:', e.message);
+async function ensureMongoConnected() {
+  if (mongoose.connection.readyState === 1) {
+    mongoStatus.connected = true;
+    mongoStatus.mode = 'mongodb';
+    return true;
   }
+  if (connectingPromise) {
+    await connectingPromise;
+    return mongoStatus.connected;
+  }
+  const targetUri = process.env.MONGODB_URI || localStore.settings.mongoUri || DEFAULT_MONGO_URI;
+  connectingPromise = connectToMongo(targetUri).finally(() => {
+    connectingPromise = null;
+  });
+  await connectingPromise;
+  return mongoStatus.connected;
 }
 
 // Initial connection attempt
@@ -325,8 +330,21 @@ function getSafeMongoStatus() {
   };
 }
 
+// Ensure MongoDB is connected for API requests
+app.use(async (req, res, next) => {
+  if (req.path.startsWith('/api') && mongoose.connection.readyState !== 1) {
+    try {
+      await ensureMongoConnected();
+    } catch (e) {}
+  }
+  next();
+});
+
 // System Status & MongoDB Health
-app.get('/api/status', (req, res) => {
+app.get('/api/status', async (req, res) => {
+  if (mongoose.connection.readyState !== 1) {
+    await ensureMongoConnected();
+  }
   res.json({
     status: 'ok',
     time: new Date().toISOString(),
