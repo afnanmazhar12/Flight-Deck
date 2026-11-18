@@ -1279,7 +1279,7 @@ if (fs.existsSync(clientDist)) {
 // -----------------------------------------------------------------------------
 // Start Server
 // -----------------------------------------------------------------------------
-if (require.main === module || !process.env.VERCEL) {
+if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`=======================================================`);
     console.log(`✈️  Flight Desk Fullstack Backend running on port ${PORT}`);

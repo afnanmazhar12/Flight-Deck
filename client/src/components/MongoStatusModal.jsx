@@ -72,7 +72,7 @@ export default function MongoStatusModal({ isOpen, onClose, mongoStatus, onStatu
             <div className="text-[#8aa0b8] mt-1">
               {mongoStatus?.connected
                 ? `Connected to database "${mongoStatus.database || 'flightdesk'}" on host: ${mongoStatus.host}`
-                : 'MongoDB daemon is offline or connection string is pending. Flights, logbooks, and fleet records are safely persisted locally.'}
+                : `MongoDB daemon is offline or connection string is pending. ${mongoStatus?.lastError ? `[Error: ${mongoStatus.lastError}]` : ''} Flights, logbooks, and fleet records are safely persisted locally.`}
             </div>
           </div>
         </div>
