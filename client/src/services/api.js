@@ -240,6 +240,10 @@ export const api = {
     return res.json();
   },
 
+  async createLogbookFromFlight(flightId) {
+    return this.archiveFlightToLogbook(flightId);
+  },
+
   async deleteLogbook(id) {
     const res = await authFetch(`${BASE_URL}/logbooks/${id}`, {
       method: 'DELETE'

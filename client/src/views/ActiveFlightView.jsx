@@ -478,8 +478,13 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
       next.done.post = true;
 
       await flushSave(next);
-      await api.createLogbookFromFlight(next.id);
+      if (typeof api.archiveFlightToLogbook === 'function') {
+        await api.archiveFlightToLogbook(next.id);
+      } else if (typeof api.createLogbookFromFlight === 'function') {
+        await api.createLogbookFromFlight(next.id);
+      }
       setArchivedToMongo(true);
+      if (onUpdateFlight) onUpdateFlight(next);
       alert('Flight sector completed and successfully archived to MongoDB Atlas Logbook!');
     } catch (err) {
       alert('Archival error: ' + err.message);
