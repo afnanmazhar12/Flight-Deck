@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* Layout: sticky top bar (brand, nav, UTC clock) over a single column; launchpad of gate-sign tiles, then flight documents rendered as paper-style sheets in the order a sector is flown. */
 :root{
   --f-head:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
@@ -245,3 +249,266 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .hist{margin-top:16px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--raised)}
 .hist .tw{margin-top:8px}
 @media print{html,body{background:#fff!important}body::after{display:none}.sheet,.panel{backdrop-filter:none;-webkit-backdrop-filter:none;background:#fff}}
+
+/* =============================================================================
+   Sleek Glassy Pilot Authentication Portal
+   ============================================================================= */
+.auth-portal-wrap {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 30px 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-ambient-grid {
+  position: fixed;
+  inset: 0;
+  background-image: 
+    linear-gradient(to right, rgba(82, 199, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(82, 199, 255, 0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
+  -webkit-mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.auth-glass-panel {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 460px;
+  background: rgba(14, 24, 38, 0.65);
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  border: 1px solid rgba(82, 199, 255, 0.22);
+  border-radius: 20px;
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.85), 0 0 30px -8px rgba(82, 199, 255, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+  animation: authFadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes authFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.auth-panel-header {
+  padding: 30px 24px 20px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(82, 199, 255, 0.08) 0%, transparent 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  position: relative;
+}
+
+.auth-logo-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: rgba(82, 199, 255, 0.12);
+  border: 1px solid rgba(82, 199, 255, 0.35);
+  color: var(--accent);
+  box-shadow: 0 8px 24px -6px rgba(82, 199, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  margin-bottom: 14px;
+}
+
+.auth-title {
+  font: 700 30px/1 var(--f-head);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--fg);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+.auth-subtitle {
+  font: 500 12px var(--f-mono);
+  letter-spacing: .06em;
+  color: var(--mute);
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+
+.auth-mode-tabs {
+  display: flex;
+  background: rgba(6, 12, 20, 0.65);
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 20px;
+  gap: 4px;
+}
+
+.auth-mode-tab {
+  flex: 1;
+  padding: 9px 12px;
+  font: 700 13px/1 var(--f-head);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--mute);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all .2s;
+}
+
+.auth-mode-tab:hover {
+  color: var(--fg);
+}
+
+.auth-mode-tab.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 4px 14px -2px rgba(82, 199, 255, 0.5);
+}
+
+.auth-form {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth-label {
+  font: 700 11.5px var(--f-head);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--mute);
+  display: flex;
+  justify-content: space-between;
+}
+
+.auth-input-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth-input-container svg {
+  position: absolute;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  color: var(--faint);
+  pointer-events: none;
+  transition: color .2s;
+}
+
+.auth-input {
+  width: 100%;
+  background: rgba(6, 12, 20, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  padding: 10px 14px 10px 38px;
+  font: 500 13.5px var(--f-mono);
+  color: var(--fg);
+  outline: none;
+  transition: all .2s;
+}
+
+.auth-input:focus {
+  border-color: var(--accent);
+  background: rgba(6, 12, 20, 0.85);
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 4px 16px -4px rgba(82, 199, 255, 0.2);
+}
+
+.auth-input:focus + svg,
+.auth-input-container:focus-within svg {
+  color: var(--accent);
+}
+
+.auth-input::placeholder {
+  color: var(--faint);
+  opacity: 0.65;
+}
+
+.auth-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.auth-submit-btn {
+  width: 100%;
+  padding: 12px 18px;
+  margin-top: 6px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: 700 15px var(--f-head);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 8px 24px -6px rgba(82, 199, 255, 0.45);
+  transition: all .2s;
+}
+
+.auth-submit-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 28px -4px rgba(82, 199, 255, 0.6);
+}
+
+.auth-submit-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.auth-error-box {
+  background: rgba(255, 111, 125, 0.12);
+  border: 1px solid rgba(255, 111, 125, 0.35);
+  color: #ff919d;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font: 500 12px var(--f-mono);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.auth-footer {
+  padding: 14px 24px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.auth-guarantee {
+  font: 500 11px var(--f-mono);
+  color: var(--faint);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

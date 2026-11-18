@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import MongoStatusModal from './components/MongoStatusModal';
-import AuthModal from './components/AuthModal';
+import AuthPage from './components/AuthPage';
 import LaunchpadView from './views/LaunchpadView';
 import FlightsView from './views/FlightsView';
 import ActiveFlightView from './views/ActiveFlightView';
@@ -92,6 +92,11 @@ export default function App() {
   const activeFlight = flights.find(f => f.id === activeFlightId);
   const activeAircraft = fleet.find(a => a.id === activeAircraftId);
 
+  // Gated Access: Zero dashboard content rendered until pilot is authenticated
+  if (!currentUser) {
+    return <AuthPage onAuthSuccess={handleAuthSuccess} />;
+  }
+
   return (
     <>
       <Navbar
@@ -103,13 +108,12 @@ export default function App() {
         mongoStatus={mongoStatus}
         onOpenMongoModal={() => setIsMongoModalOpen(true)}
         currentUser={currentUser}
-        onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onLogout={handleLogout}
       />
 
       <div className="wrap">
         <div id="banner"></div>
-        <main id="main">
+        <main id="main" key={currentUser.id}>
           {currentView === 'launchpad' && (
             <LaunchpadView
               flights={flights}
@@ -178,13 +182,6 @@ export default function App() {
         onClose={() => setIsMongoModalOpen(false)}
         mongoStatus={mongoStatus}
         onStatusChange={(newStatus) => setMongoStatus(newStatus)}
-      />
-
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        onAuthSuccess={handleAuthSuccess}
-        canClose={!!currentUser}
       />
     </>
   );
