@@ -1451,35 +1451,75 @@ function parseOFP(j) {
 }
 
 
+const sbCache = new Map();
+const SB_CACHE_TTL = 60 * 1000; // 60 seconds cache
+
 app.get('/api/simbrief/:user', async (req, res) => {
   const { user } = req.params;
   if (!user) return res.status(400).json({ error: 'Username or Pilot ID is required' });
+
+  const cleanUser = user.trim().toLowerCase();
+  const cached = sbCache.get(cleanUser);
+  if (cached && (Date.now() - cached.time < SB_CACHE_TTL)) {
+    return res.json(cached.data);
+  }
 
   const isNumeric = /^\d+$/.test(user.trim());
   const queryParam = isNumeric ? `userid=${encodeURIComponent(user.trim())}` : `username=${encodeURIComponent(user.trim())}`;
   const url = `https://www.simbrief.com/api/xml.fetcher.php?${queryParam}&json=1`;
 
-  try {
-    const response = await axios.get(url, { timeout: 12000 });
-    const data = response.data;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(15000)
+      });
+      if (!response.ok) {
+        throw new Error(`SimBrief HTTP ${response.status}`);
+      }
+      const data = await response.json();
 
-    if (data.fetch && data.fetch.status && data.fetch.status.toLowerCase() !== 'success') {
-      return res.status(400).json({ error: 'SimBrief error: ' + data.fetch.status });
+      if (data.fetch && data.fetch.status && data.fetch.status.toLowerCase() !== 'success') {
+        return res.status(400).json({ error: 'SimBrief error: ' + (data.fetch.status || 'Flight plan not found') });
+      }
+
+      localStore.settings.simbriefUser = user;
+      saveLocalStore();
+
+      if (req.user && mongoStatus.connected) {
+        try {
+          await User.updateOne({ id: req.user.id }, { simbriefUser: user.trim() });
+        } catch (e) {}
+      }
+
+      const parsed = parseOFP(data) || {};
+      const payload = {
+        ...data,
+        d: parsed.d,
+        fixes: parsed.fixes || [],
+        text: parsed.text || ''
+      };
+
+      sbCache.set(cleanUser, { time: Date.now(), data: payload });
+      return res.json(payload);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
     }
-
-    localStore.settings.simbriefUser = user;
-    saveLocalStore();
-
-    const parsed = parseOFP(data) || {};
-    res.json({
-      ...data,
-      d: parsed.d,
-      fixes: parsed.fixes || [],
-      text: parsed.text || ''
-    });
-  } catch (err) {
-    res.status(502).json({ error: 'Failed to contact SimBrief: ' + err.message });
   }
+
+  // If failed but we have stale cache, return stale cache gracefully
+  if (cached) {
+    return res.json(cached.data);
+  }
+
+  res.status(502).json({ error: 'Failed to contact SimBrief: ' + (lastErr?.message || 'Network error') });
 });
 
 // Proxy SimBrief PDF to allow clean inline embedding in <iframe> without X-Frame-Options errors

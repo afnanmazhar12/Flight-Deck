@@ -90,7 +90,10 @@ export default function LaunchpadView({ flights, fleet, onNewFlight, onOpenFligh
           </p>
         </div>
         <div className="row">
-          <button className="btn" onClick={onNewFlight}>New flight</button>
+          <button className="btn" onClick={() => onNewFlight(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span>⚡ Uplink SimBrief Flight</span>
+          </button>
+          <button className="btn ghost" onClick={() => onNewFlight(false)}>Manual Flight</button>
           <button className="btn ghost" onClick={() => setView('fleet')}>Fleet</button>
         </div>
       </div>
@@ -178,7 +181,10 @@ export default function LaunchpadView({ flights, fleet, onNewFlight, onOpenFligh
           {na ? 'No open flights. Start one and the documents are ready in order.' : 'Register an aircraft first, then start a flight.'}
           <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
             {na ? (
-              <button className="btn" onClick={onNewFlight}>New flight</button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                <button className="btn" onClick={() => onNewFlight(true)}>⚡ Uplink From SimBrief</button>
+                <button className="btn ghost" onClick={() => onNewFlight(false)}>Manual Flight</button>
+              </div>
             ) : (
               <button className="btn" onClick={() => setView('fleet')}>Register aircraft</button>
             )}

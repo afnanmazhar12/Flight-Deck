@@ -16,6 +16,7 @@ export default function App() {
   const [activeFlightId, setActiveFlightId] = useState(null);
   const [activeAircraftId, setActiveAircraftId] = useState(null);
   const [activeVatsimCallsign, setActiveVatsimCallsign] = useState('');
+  const [autoUplink, setAutoUplink] = useState(false);
 
   const [currentUser, setCurrentUser] = useState(() => api.getCurrentUser());
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(() => !api.getCurrentUser());
@@ -118,7 +119,8 @@ export default function App() {
             <LaunchpadView
               flights={flights}
               fleet={fleet}
-              onNewFlight={() => {
+              onNewFlight={(shouldUplink = true) => {
+                setAutoUplink(shouldUplink);
                 setView('flights');
               }}
               onOpenFlight={handleOpenFlight}
@@ -132,6 +134,9 @@ export default function App() {
               fleet={fleet}
               onOpenFlight={handleOpenFlight}
               onRefreshFlights={refreshAll}
+              autoUplinkOnMount={autoUplink}
+              onClearAutoUplink={() => setAutoUplink(false)}
+              currentUser={currentUser}
             />
           )}
 

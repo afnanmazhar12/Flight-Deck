@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { Radio, RefreshCw, Zap, Plus, X, AlertCircle } from 'lucide-react';
 
 const STAGES = [
   ['pre', 'Preflight'],
@@ -31,7 +32,15 @@ function statusCls(s) {
   return s === 'Completed' ? 'ok' : s === 'Planning' ? '' : 'acc';
 }
 
-export default function FlightsView({ flights, fleet, onOpenFlight, onRefreshFlights }) {
+export default function FlightsView({
+  flights,
+  fleet,
+  onOpenFlight,
+  onRefreshFlights,
+  autoUplinkOnMount = false,
+  onClearAutoUplink,
+  currentUser
+}) {
   const [showNewFlight, setShowNewFlight] = useState(false);
   const [draft, setDraft] = useState({
     callsign: '',
@@ -46,13 +55,180 @@ export default function FlightsView({ flights, fleet, onOpenFlight, onRefreshFli
   const [creating, setCreating] = useState(false);
   const [deleteArm, setDeleteArm] = useState(null);
 
-  // Auto-fetch callsign suggestion when opening the new flight form
+  // SimBrief Auto-Uplink States
+  const [uplinking, setUplinking] = useState(false);
+  const [uplinkStatus, setUplinkStatus] = useState('');
+  const [uplinkError, setUplinkError] = useState('');
+  const [showSbPrompt, setShowSbPrompt] = useState(false);
+  const [sbPromptUser, setSbPromptUser] = useState('');
+
+  // Trigger auto-uplink if user came from Launchpad "⚡ Uplink SimBrief Flight"
+  useEffect(() => {
+    if (autoUplinkOnMount) {
+      if (onClearAutoUplink) onClearAutoUplink();
+      handleAutoUplinkSimbrief();
+    }
+  }, [autoUplinkOnMount]);
+
+  // Main 1-Click Automated SimBrief Uplink Handler
+  const handleAutoUplinkSimbrief = async (providedUser = null) => {
+    setUplinkError('');
+    const targetUser = (
+      providedUser ||
+      currentUser?.simbriefUser ||
+      localStorage.getItem('flightdesk-sbuser') ||
+      currentUser?.username ||
+      ''
+    ).trim();
+
+    if (!targetUser) {
+      setShowSbPrompt(true);
+      return;
+    }
+
+    setUplinking(true);
+    setUplinkStatus(`Connecting to SimBrief for pilot "${targetUser}"...`);
+
+    try {
+      localStorage.setItem('flightdesk-sbuser', targetUser);
+      const ofpRes = await api.getSimbriefOFP(targetUser);
+
+      if (!ofpRes || !ofpRes.d) {
+        throw new Error('SimBrief returned no flight plan. Please generate an OFP on SimBrief first.');
+      }
+
+      const D = ofpRes.d;
+      setUplinkStatus(`Uplinked: ${D.org} → ${D.dst} (${D.cs || D.fn}) · Matching aircraft...`);
+
+      // Match aircraft in fleet by ICAO or registration
+      const targetIcao = (D.acft || '').toUpperCase();
+      const targetReg = (D.reg || '').toUpperCase();
+      const matchedAc = fleet.find(a => 
+        (a.icao && a.icao.toUpperCase() === targetIcao) ||
+        (a.tpl && a.tpl.toUpperCase() === targetIcao) ||
+        (a.reg && a.reg.toUpperCase() === targetReg)
+      ) || fleet[0];
+
+      const toKg = x => {
+        if (!x) return '';
+        const val = parseFloat(x);
+        if (isNaN(val)) return '';
+        return D.units === 'LBS' ? String(Math.round(val / 2.20462262)) : String(Math.round(val));
+      };
+
+      const flightPayload = {
+        callsign: (D.cs || D.fn || 'SVA123').toUpperCase(),
+        flightNo: (D.fn || D.cs || 'SV123').toUpperCase(),
+        dep: (D.org || '').toUpperCase(),
+        arr: (D.dst || '').toUpperCase(),
+        alt: (D.alt || '').toUpperCase(),
+        date: new Date().toISOString().slice(0, 10),
+        network: 'VATSIM',
+        ac: matchedAc,
+        aircraftId: matchedAc?.id,
+        pre: {
+          route: D.route || '',
+          cruise: D.fl || '',
+          etd: D.out || '',
+          eta: D.in || '',
+          ofp: `Taxi ${D.fuel?.taxi || ''} · Trip ${D.fuel?.trip || ''} · Block ${D.fuel?.ramp || ''} ${D.units || 'KG'}`,
+          wx: [D.metarO, D.metarD, D.metarA].filter(Boolean).join('\n'),
+          notam: (D.notams && D.notams.length) ? D.notams.join('\n\n').slice(0, 4000) : ''
+        },
+        load: {
+          bew: toKg(D.wt?.oew) || matchedAc?.bew || '',
+          paxCount: D.wt?.pax || '',
+          block: toKg(D.fuel?.ramp),
+          taxi: toKg(D.fuel?.taxi),
+          trip: toKg(D.fuel?.trip)
+        },
+        fuel: {
+          required: D.fuel?.ramp || '',
+          massUnit: D.units || 'KG'
+        },
+        times: {
+          plan: {
+            out: D.out || '',
+            off: D.off || '',
+            on: D.on || '',
+            in: D.in || '',
+            txo: D.txo || '15',
+            txi: D.txi || '8'
+          }
+        },
+        sb: {
+          user: targetUser,
+          at: Date.now(),
+          d: D,
+          fixes: ofpRes.fixes || [],
+          text: ofpRes.text || ''
+        }
+      };
+
+      setUplinkStatus(`Creating sector ${flightPayload.callsign} (${flightPayload.dep} → ${flightPayload.arr})...`);
+      const created = await api.createFlight(flightPayload);
+      if (onRefreshFlights) await onRefreshFlights();
+      setShowNewFlight(false);
+      setShowSbPrompt(false);
+      onOpenFlight(created.id);
+    } catch (err) {
+      console.error('SimBrief Uplink Error:', err);
+      setUplinkError(err.message || 'Failed to uplink flight from SimBrief');
+    } finally {
+      setUplinking(false);
+    }
+  };
+
+  // Auto-Fill Form from SimBrief (for manual inspector)
+  const handleAutoFillDraftFromSimbrief = async () => {
+    const sbUser = (
+      currentUser?.simbriefUser ||
+      localStorage.getItem('flightdesk-sbuser') ||
+      currentUser?.username ||
+      ''
+    ).trim();
+
+    if (!sbUser) {
+      setShowSbPrompt(true);
+      return;
+    }
+
+    setUplinking(true);
+    setUplinkError('');
+    try {
+      const ofpRes = await api.getSimbriefOFP(sbUser);
+      if (ofpRes && ofpRes.d) {
+        const D = ofpRes.d;
+        const targetIcao = (D.acft || '').toUpperCase();
+        const targetReg = (D.reg || '').toUpperCase();
+        const matchedAc = fleet.find(a => 
+          (a.icao && a.icao.toUpperCase() === targetIcao) ||
+          (a.tpl && a.tpl.toUpperCase() === targetIcao) ||
+          (a.reg && a.reg.toUpperCase() === targetReg)
+        ) || fleet[0];
+
+        setDraft(prev => ({
+          ...prev,
+          callsign: (D.cs || D.fn || prev.callsign).toUpperCase(),
+          flightNo: (D.fn || D.cs || prev.flightNo).toUpperCase(),
+          dep: (D.org || prev.dep).toUpperCase(),
+          arr: (D.dst || prev.arr).toUpperCase(),
+          alt: (D.alt || prev.alt).toUpperCase(),
+          ac: matchedAc?.id || prev.ac
+        }));
+      }
+    } catch (err) {
+      setUplinkError('SimBrief Auto-Fill Error: ' + err.message);
+    } finally {
+      setUplinking(false);
+    }
+  };
+
   const handleToggleNewFlight = async () => {
     if (!showNewFlight) {
-      // open
       try {
-        const suggestion = await api.suggestCallsign();
-        const defaultAc = fleet.find(a => a.id === suggestion.suggestedAcId)?.id || fleet.find(a => a.reg === 'D-ABNL')?.id || (fleet[0]?.id || '');
+        const suggestion = await api.getSuggestedCallsign().catch(() => ({}));
+        const defaultAc = fleet.find(a => a.id === suggestion.suggestedAcId)?.id || (fleet[0]?.id || '');
         setDraft({
           callsign: suggestion.suggestedCallsign || 'SVA123',
           flightNo: suggestion.suggestedFlightNo || 'SV123',
@@ -64,10 +240,7 @@ export default function FlightsView({ flights, fleet, onOpenFlight, onRefreshFli
           ac: defaultAc
         });
       } catch (err) {
-        setDraft(prev => ({
-          ...prev,
-          ac: prev.ac || (fleet[0]?.id || '')
-        }));
+        setDraft(prev => ({ ...prev, ac: prev.ac || (fleet[0]?.id || '') }));
       }
       setShowNewFlight(true);
     } else {
@@ -120,9 +293,7 @@ export default function FlightsView({ flights, fleet, onOpenFlight, onRefreshFli
       }
     } else {
       setDeleteArm(id);
-      setTimeout(() => {
-        setDeleteArm(null);
-      }, 4000);
+      setTimeout(() => setDeleteArm(null), 4000);
     }
   };
 
@@ -132,16 +303,194 @@ export default function FlightsView({ flights, fleet, onOpenFlight, onRefreshFli
     <>
       <div className="fhead">
         <div>
-          <p className="eyebrow">Logbook</p>
+          <p className="eyebrow">Flight Operations</p>
           <h1>Flights</h1>
         </div>
-        <button className="btn" onClick={handleToggleNewFlight}>
-          NEW FLIGHT
-        </button>
+        <div className="row">
+          <button 
+            className="btn" 
+            onClick={() => handleAutoUplinkSimbrief()}
+            disabled={uplinking}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'var(--accent)', color: 'var(--accent-ink)' }}
+          >
+            {uplinking ? (
+              <>
+                <RefreshCw size={15} style={{ animation: 'spin 1s linear infinite' }} />
+                <span>Uplinking SimBrief...</span>
+              </>
+            ) : (
+              <>
+                <Zap size={15} />
+                <span>Uplink From SimBrief</span>
+              </>
+            )}
+          </button>
+          <button className="btn ghost" onClick={handleToggleNewFlight}>
+            {showNewFlight ? 'Close Form' : 'Manual Entry'}
+          </button>
+        </div>
       </div>
 
+      {/* Live Uplink Status Ribbon */}
+      {uplinking && (
+        <div 
+          className="banner" 
+          style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 10, 
+            borderColor: 'var(--accent)', 
+            background: 'var(--accent-soft)',
+            color: 'var(--accent)',
+            font: '600 13px var(--f-mono)' 
+          }}
+        >
+          <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }} />
+          <span>{uplinkStatus || 'Uplinking latest flight plan from SimBrief...'}</span>
+        </div>
+      )}
+
+      {/* Uplink Error Notification */}
+      {uplinkError && (
+        <div 
+          className="banner" 
+          style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 10, 
+            borderColor: 'var(--bad)', 
+            background: 'var(--bad-soft)',
+            color: 'var(--bad)',
+            font: '500 13px var(--f-mono)' 
+          }}
+        >
+          <AlertCircle size={16} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1 }}>{uplinkError}</span>
+          <button 
+            onClick={() => setUplinkError('')}
+            style={{ background: 'transparent', border: 0, color: 'inherit', cursor: 'pointer' }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {/* SimBrief Username Prompt Modal if not yet known */}
+      {showSbPrompt && (
+        <div 
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(16px)'
+          }}
+        >
+          <div 
+            style={{
+              background: 'rgba(14, 24, 38, 0.95)',
+              backdropFilter: 'blur(28px)',
+              border: '1px solid rgba(82, 199, 255, 0.3)',
+              borderRadius: 16,
+              maxWidth: 440,
+              width: '100%',
+              padding: 24,
+              boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.9)',
+              position: 'relative'
+            }}
+          >
+            <button
+              onClick={() => setShowSbPrompt(false)}
+              style={{ position: 'absolute', top: 16, right: 16, background: 'transparent', border: 0, color: 'var(--mute)', cursor: 'pointer' }}
+            >
+              <X size={18} />
+            </button>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <div style={{ padding: 8, borderRadius: 8, background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                <Radio size={20} />
+              </div>
+              <div>
+                <h3 style={{ font: '700 20px/1.1 var(--f-head)', letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--fg)' }}>
+                  SimBrief Dispatch Uplink
+                </h3>
+                <p style={{ font: '500 11.5px var(--f-mono)', color: 'var(--mute)', marginTop: 2 }}>
+                  Enter your SimBrief Username or Pilot ID to auto-import your latest OFP
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={(e) => { e.preventDefault(); if (sbPromptUser.trim()) handleAutoUplinkSimbrief(sbPromptUser.trim()); }}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', font: '700 11px var(--f-head)', letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--mute)', marginBottom: 6 }}>
+                  SimBrief Username or Pilot ID
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={sbPromptUser}
+                  onChange={(e) => setSbPromptUser(e.target.value)}
+                  placeholder="e.g. afnanmazhar12 or 341061"
+                  style={{
+                    width: '100%',
+                    background: 'rgba(6, 12, 20, 0.7)',
+                    border: '1px solid var(--line2)',
+                    borderRadius: 8,
+                    padding: '9px 12px',
+                    font: '500 13px var(--f-mono)',
+                    color: 'var(--fg)',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowSbPrompt(false)}
+                  className="btn ghost sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!sbPromptUser.trim()}
+                  className="btn sm"
+                >
+                  <Zap size={14} /> Uplink & Create Flight
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Manual / Semi-Automated Flight Form */}
       {showNewFlight && (
         <div className="panel" style={{ marginBottom: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, paddingBottom: 10, borderBottom: '1px solid var(--line)' }}>
+            <div>
+              <b style={{ font: '700 16px var(--f-head)', letterSpacing: '.06em', textTransform: 'uppercase' }}>New Sector Creation</b>
+              <p style={{ font: '500 11.5px var(--f-mono)', color: 'var(--mute)', margin: 0 }}>
+                Prefill manually or click Auto-Fill from SimBrief to populate DEP, ARR, Route and Aircraft
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={handleAutoFillDraftFromSimbrief}
+              disabled={uplinking}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, margin: 0 }}
+            >
+              <Zap size={13} /> Auto-Fill From SimBrief
+            </button>
+          </div>
+
           <div className="form-grid">
             <label className="fld">
               <span>CALLSIGN</span>
@@ -170,21 +519,21 @@ export default function FlightsView({ flights, fleet, onOpenFlight, onRefreshFli
               />
             </label>
             <label className="fld">
-              <span>FROM</span>
+              <span>FROM (DEP)</span>
               <input 
                 value={draft.dep}
                 onChange={e => setDraft({ ...draft, dep: e.target.value.toUpperCase() })}
-                placeholder="OEJN" 
+                placeholder="OERK" 
                 maxLength={4} 
                 style={{ textTransform: 'uppercase' }}
               />
             </label>
             <label className="fld">
-              <span>TO</span>
+              <span>TO (ARR)</span>
               <input 
                 value={draft.arr}
                 onChange={e => setDraft({ ...draft, arr: e.target.value.toUpperCase() })}
-                placeholder="OPKC" 
+                placeholder="OEMA" 
                 maxLength={4} 
                 style={{ textTransform: 'uppercase' }}
               />
@@ -194,6 +543,7 @@ export default function FlightsView({ flights, fleet, onOpenFlight, onRefreshFli
               <input 
                 value={draft.alt}
                 onChange={e => setDraft({ ...draft, alt: e.target.value.toUpperCase() })}
+                placeholder="OEJN"
                 maxLength={4} 
                 style={{ textTransform: 'uppercase' }}
               />
@@ -228,52 +578,6 @@ export default function FlightsView({ flights, fleet, onOpenFlight, onRefreshFli
             </label>
           </div>
 
-          {/* Star Alliance Virtual Recent Flights Preview for selected aircraft */}
-          {selectedAc && selectedAc.history && selectedAc.history.length > 0 && (
-            <div className="hist" style={{ marginTop: 16 }}>
-              <div className="row" style={{ justifyContent: 'space-between' }}>
-                <b className="lab" style={{ fontSize: 13 }}>
-                  LAST 7 FLIGHTS · {selectedAc.reg}
-                </b>
-                <span className="note" style={{ margin: 0 }}>
-                  as of 17 Nov 2026
-                </span>
-              </div>
-
-              <div className="tw" style={{ marginTop: 8 }}>
-                <table className="t" style={{ minWidth: 720 }}>
-                  <thead>
-                    <tr>
-                      <th>FLT #</th>
-                      <th>PILOT</th>
-                      <th>DEP</th>
-                      <th>ARR</th>
-                      <th>WHEN</th>
-                      <th>TIME</th>
-                      <th>REMARKS</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedAc.history.slice(0, 7).map((r, i) => (
-                      <tr key={i}>
-                        <td><b>{r.flt}</b></td>
-                        <td>{r.pilot}</td>
-                        <td>{r.dep}</td>
-                        <td>{r.arr}</td>
-                        <td>{r.when}</td>
-                        <td>{r.dur}</td>
-                        <td>{r.remarks || 'Nil defects. Aircraft serviceable.'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div style={{ marginTop: 8 }}>
-                <span className="note" style={{ cursor: 'pointer', margin: 0 }}>▶ Update from Star Alliance Virtual</span>
-              </div>
-            </div>
-          )}
-
           <div className="row" style={{ marginTop: 16 }}>
             {fleet.length ? (
               <button 
@@ -291,6 +595,7 @@ export default function FlightsView({ flights, fleet, onOpenFlight, onRefreshFli
         </div>
       )}
 
+      {/* Flights Table */}
       {flights && flights.length ? (
         <div className="panel" style={{ overflowX: 'auto' }}>
           <table className="ftable" style={{ minWidth: 640 }}>
@@ -349,7 +654,23 @@ export default function FlightsView({ flights, fleet, onOpenFlight, onRefreshFli
           </table>
         </div>
       ) : (
-        <div className="empty-state">No flights yet.</div>
+        <div className="empty-state" style={{ padding: '40px 20px' }}>
+          <Radio size={36} style={{ color: 'var(--accent)', marginBottom: 12 }} />
+          <h3 style={{ font: '700 20px var(--f-head)', letterSpacing: '.06em', textTransform: 'uppercase', marginBottom: 6 }}>
+            No Flights Logged Yet
+          </h3>
+          <p style={{ font: '500 13px var(--f-mono)', color: 'var(--mute)', marginBottom: 16 }}>
+            Ready for departure? Uplink your latest SimBrief flight plan in 1 click without typing DEP or ARR.
+          </p>
+          <button 
+            className="btn" 
+            onClick={() => handleAutoUplinkSimbrief()}
+            disabled={uplinking}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+          >
+            <Zap size={15} /> Uplink Flight From SimBrief
+          </button>
+        </div>
       )}
     </>
   );
