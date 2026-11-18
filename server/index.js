@@ -321,15 +321,18 @@ let vatsimCache = {
   fetchedAt: 0,
   isFetching: false
 };
-const VATSIM_TTL_MS = 15000; // 15 seconds cache to respect VATSIM policy
+const VATSIM_TTL_MS = 25000; // 25 seconds cache
 
 async function refreshVatsimFeed() {
   if (vatsimCache.isFetching) return vatsimCache.data;
   vatsimCache.isFetching = true;
   try {
     const res = await axios.get('https://data.vatsim.net/v3/vatsim-data.json', { 
-      timeout: 15000,
-      headers: { 'Accept-Encoding': 'gzip,deflate,compress' }
+      timeout: 10000,
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      }
     });
     if (res.data && res.data.pilots) {
       vatsimCache.data = res.data;
@@ -337,16 +340,15 @@ async function refreshVatsimFeed() {
     }
     return vatsimCache.data;
   } catch (err) {
-    console.warn('[VATSIM Feed] Refresh warning:', err.message);
     return vatsimCache.data;
   } finally {
     vatsimCache.isFetching = false;
   }
 }
 
-// Background auto-refresh feed
+// Background auto-refresh feed every 30s
 refreshVatsimFeed();
-setInterval(refreshVatsimFeed, VATSIM_TTL_MS);
+setInterval(refreshVatsimFeed, 30000);
 
 async function getVatsimData() {
   const now = Date.now();
