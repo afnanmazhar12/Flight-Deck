@@ -313,12 +313,24 @@ async function getVatsimData() {
 // API Routes
 // -----------------------------------------------------------------------------
 
+function maskUri(uri) {
+  if (!uri) return '';
+  return uri.replace(/:([^:@]+)@/, ':****@');
+}
+
+function getSafeMongoStatus() {
+  return {
+    ...mongoStatus,
+    uri: maskUri(mongoStatus.uri)
+  };
+}
+
 // System Status & MongoDB Health
 app.get('/api/status', (req, res) => {
   res.json({
     status: 'ok',
     time: new Date().toISOString(),
-    mongo: mongoStatus,
+    mongo: getSafeMongoStatus(),
     counts: {
       flights: Object.keys(localStore.flights).length,
       fleet: Object.keys(localStore.fleet).length,
@@ -334,12 +346,15 @@ app.post('/api/settings/mongo', async (req, res) => {
     return res.status(400).json({ error: 'URI is required' });
   }
   const result = await connectToMongo(uri.trim());
-  res.json({ ...result, mongoStatus });
+  res.json({ ...result, mongoStatus: getSafeMongoStatus() });
 });
 
 // Settings (e.g. SimBrief username)
 app.get('/api/settings', (req, res) => {
-  res.json(localStore.settings);
+  res.json({
+    ...localStore.settings,
+    mongoUri: maskUri(localStore.settings.mongoUri)
+  });
 });
 
 app.post('/api/settings', (req, res) => {
