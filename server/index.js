@@ -318,23 +318,112 @@ connectToMongo();
 // -----------------------------------------------------------------------------
 let vatsimCache = {
   data: null,
-  fetchedAt: 0
+  fetchedAt: 0,
+  isFetching: false
 };
 const VATSIM_TTL_MS = 15000; // 15 seconds cache to respect VATSIM policy
+
+async function refreshVatsimFeed() {
+  if (vatsimCache.isFetching) return vatsimCache.data;
+  vatsimCache.isFetching = true;
+  try {
+    const res = await axios.get('https://data.vatsim.net/v3/vatsim-data.json', { 
+      timeout: 15000,
+      headers: { 'Accept-Encoding': 'gzip,deflate,compress' }
+    });
+    if (res.data && res.data.pilots) {
+      vatsimCache.data = res.data;
+      vatsimCache.fetchedAt = Date.now();
+    }
+    return vatsimCache.data;
+  } catch (err) {
+    console.warn('[VATSIM Feed] Refresh warning:', err.message);
+    return vatsimCache.data;
+  } finally {
+    vatsimCache.isFetching = false;
+  }
+}
+
+// Background auto-refresh feed
+refreshVatsimFeed();
+setInterval(refreshVatsimFeed, VATSIM_TTL_MS);
 
 async function getVatsimData() {
   const now = Date.now();
   if (vatsimCache.data && now - vatsimCache.fetchedAt < VATSIM_TTL_MS) {
     return vatsimCache.data;
   }
+  if (!vatsimCache.data) {
+    return await refreshVatsimFeed();
+  }
+  // Return cached immediately and refresh in background
+  refreshVatsimFeed().catch(() => {});
+  return vatsimCache.data;
+}
+
+function computeVatsimFlightPhase(pilot) {
+  if (!pilot) return null;
+  const gs = Number(pilot.groundspeed) || 0;
+  const alt = Number(pilot.altitude) || 0;
+  const fp = pilot.flight_plan || {};
+  let plannedCruise = parseInt(String(fp.altitude).replace(/[^\d]/g, ''), 10);
+  if (plannedCruise && plannedCruise < 1000) plannedCruise *= 100;
+  if (!plannedCruise) plannedCruise = 30000;
+
+  if (gs < 5 && alt < 3500) return 'Boarding / Gate';
+  if (gs >= 5 && gs <= 40 && alt < 3500) return 'Taxiing';
+  if (gs > 40 && gs < 160 && alt < 2500) return 'Takeoff / Departure';
+  if (alt >= plannedCruise - 2000 || (alt > 20000 && gs > 300)) {
+    const fl = Math.round(alt / 100);
+    return `Cruising (FL${fl})`;
+  }
+  if (alt > 8000 && gs > 200) return `Enroute (${Math.round(alt / 100) * 100}ft)`;
+  if (gs > 60 && alt < 8000) return 'Approach / Descent';
+  return 'Online (VATSIM)';
+}
+
+async function attachVatsimLiveInfo(flights) {
+  if (!flights || !flights.length) return flights;
   try {
-    const res = await axios.get('https://data.vatsim.net/v3/vatsim-data.json', { timeout: 8000 });
-    vatsimCache.data = res.data;
-    vatsimCache.fetchedAt = now;
-    return res.data;
+    const vatsim = await getVatsimData().catch(() => null);
+    const pilots = (vatsim && vatsim.pilots) || [];
+    const pilotMap = new Map();
+    if (pilots.length) {
+      pilots.forEach(p => {
+        if (p.callsign) {
+          pilotMap.set(p.callsign.toUpperCase(), p);
+        }
+      });
+    }
+
+    return flights.map(f => {
+      const cs = (f.callsign || '').toUpperCase();
+      const fn = (f.flightNo || '').toUpperCase();
+      const matchedPilot = pilotMap.get(cs) || (fn ? pilotMap.get(fn) : null);
+
+      if (matchedPilot) {
+        const phase = computeVatsimFlightPhase(matchedPilot);
+        return {
+          ...f,
+          vatsimPhase: phase,
+          vatsimLive: {
+            online: true,
+            phase,
+            gs: matchedPilot.groundspeed,
+            alt: matchedPilot.altitude,
+            heading: matchedPilot.heading,
+            logon_time: matchedPilot.logon_time
+          }
+        };
+      }
+      return {
+        ...f,
+        vatsimPhase: null,
+        vatsimLive: { online: false }
+      };
+    });
   } catch (err) {
-    if (vatsimCache.data) return vatsimCache.data;
-    throw new Error('Failed to fetch VATSIM data feed: ' + err.message);
+    return flights.map(f => ({ ...f, vatsimPhase: null, vatsimLive: { online: false } }));
   }
 }
 
@@ -828,14 +917,16 @@ app.get('/api/flights/suggest-callsign', async (req, res) => {
 app.get('/api/flights', async (req, res) => {
   const userId = req.user ? req.user.id : 'guest';
   try {
+    let flights = [];
     if (mongoStatus.connected) {
-      const flights = await Flight.find({ userId }).sort({ created: -1 }).lean();
-      return res.json(flights);
+      flights = await Flight.find({ userId }).sort({ created: -1 }).lean();
+    } else {
+      flights = Object.values(localStore.flights)
+        .filter(f => (f.userId || 'guest') === userId)
+        .sort((a, b) => (b.created || 0) - (a.created || 0));
     }
-    const list = Object.values(localStore.flights)
-      .filter(f => (f.userId || 'guest') === userId)
-      .sort((a, b) => (b.created || 0) - (a.created || 0));
-    res.json(list);
+    const enriched = await attachVatsimLiveInfo(flights);
+    res.json(enriched);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -845,15 +936,18 @@ app.get('/api/flights/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user ? req.user.id : 'guest';
+    let flt = null;
     if (mongoStatus.connected) {
-      const flt = await Flight.findOne({ id, userId }).lean();
-      if (flt) return res.json(flt);
+      flt = await Flight.findOne({ id, userId }).lean();
     }
-    const flt = localStore.flights[id];
+    if (!flt) {
+      flt = localStore.flights[id];
+    }
     if (!flt || (flt.userId && flt.userId !== userId)) {
       return res.status(404).json({ error: 'Flight not found or unauthorized' });
     }
-    res.json(flt);
+    const [enriched] = await attachVatsimLiveInfo([flt]);
+    res.json(enriched || flt);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1607,6 +1701,8 @@ app.get('/api/vatsim/pilot/:callsign', async (req, res) => {
       minutesOnline = Math.max(0, Math.round((now - logon) / 60000));
     }
 
+    const phase = computeVatsimFlightPhase(pilot);
+
     // Build comprehensive telemetry and flight details
     const result = {
       found: true,
@@ -1617,6 +1713,11 @@ app.get('/api/vatsim/pilot/:callsign', async (req, res) => {
       pilot_rating: pilot.pilot_rating,
       server: pilot.server,
       logon_time: pilot.logon_time,
+      flightPhase: phase,
+      phase,
+      groundspeed: pilot.groundspeed,
+      altitude: pilot.altitude,
+      heading: pilot.heading,
       minutesOnline,
       hoursOnlineFormatted: minutesOnline != null ? `${Math.floor(minutesOnline / 60)}h ${minutesOnline % 60}m` : '—',
 

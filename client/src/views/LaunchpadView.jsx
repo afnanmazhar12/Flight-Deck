@@ -38,16 +38,29 @@ function fmtDate(d) {
 }
 
 function statusOf(F) {
+  if (!F) return 'Planning';
   if (F.post && F.post.completed) return 'Completed';
+  if (F.vatsimPhase) return F.vatsimPhase;
+  if (F.vatsimLive?.online && F.vatsimLive?.phase) return F.vatsimLive.phase;
   const d = F.done || {};
-  if (d.comms) return 'Postflight';
-  if (d.load || d.fuel || d.tech) return 'Ground';
-  if (d.pre) return 'Briefed';
+  if (d.post) return 'Completed';
+  if (F.times?.actual?.in) return 'Arrived / Gate';
+  if (F.times?.actual?.on) return 'Landed';
+  if (F.times?.actual?.off) return 'Airborne';
+  if (F.times?.actual?.out) return 'Departed / Taxi';
+  if (d.times && d.comms) return 'Postflight';
+  if (d.comms) return 'Enroute';
+  if (d.load || d.fuel || d.tech) return 'Ready for Push';
+  if (d.pre || d.sb) return 'Briefed';
   return 'Planning';
 }
 
 function statusCls(s) {
-  return s === 'Completed' ? 'ok' : s === 'Planning' ? '' : 'acc';
+  if (!s || s === 'Planning') return '';
+  if (s === 'Completed') return 'ok';
+  if (s.includes('Cruising') || s.includes('Airborne') || s.includes('Enroute') || s.includes('Online')) return 'acc';
+  if (s.includes('Taxi') || s.includes('Boarding') || s.includes('Ready') || s.includes('Departure') || s.includes('Approach')) return 'warn';
+  return 'acc';
 }
 
 export default function LaunchpadView({ flights, fleet, onNewFlight, onOpenFlight, setView, onExportBackup, onImportBackup }) {
@@ -161,7 +174,14 @@ export default function LaunchpadView({ flights, fleet, onNewFlight, onOpenFligh
                       <span className="note" style={{ margin: 0 }}>{F.ac?.typeLabel}</span>
                     </td>
                     <td>
-                      <span className={`pill ${statusCls(s)}`}>{s}</span>
+                      <span className={`pill ${statusCls(s)}`}>
+                        {F.vatsimLive?.online ? '✈️ ' : ''}{s}
+                      </span>
+                      {F.vatsimLive?.online && F.vatsimLive?.gs != null && (
+                        <span className="note" style={{ margin: '2px 0 0 0', display: 'block', fontSize: '11px', color: 'var(--accent)' }}>
+                          {F.vatsimLive.gs} kt · {F.vatsimLive.alt} ft
+                        </span>
+                      )}
                     </td>
                     <td>
                       <span className="dots" aria-label="Stages done">

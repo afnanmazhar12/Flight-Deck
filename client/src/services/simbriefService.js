@@ -142,20 +142,39 @@ export function applyOFPToFlight(flight, parsedOFP, overwrite = true) {
     updated.pre.wx = [D.metarO, D.metarD, D.metarA].filter(Boolean).join('\n');
   }
 
-  // Loadsheet (All weights standardized to KG)
+  // Loadsheet (All weights standardized to KG, Dispatch Time in UTC)
   updated.load = updated.load || {};
   if (overwrite || !updated.load.bew) updated.load.bew = toKg(D.wt.oew);
   if (overwrite || !updated.load.paxCount) updated.load.paxCount = D.wt.pax;
   if (overwrite || !updated.load.block) updated.load.block = toKg(D.fuel.ramp);
   if (overwrite || !updated.load.taxi) updated.load.taxi = toKg(D.fuel.taxi);
   if (overwrite || !updated.load.trip) updated.load.trip = toKg(D.fuel.trip);
+  updated.load.disp = updated.load.disp || {};
+  if (!updated.load.disp.time) updated.load.disp.time = D.out || '';
+  if (!updated.load.disp.sig) updated.load.disp.sig = 'OFP DISPATCH';
+  updated.load.cap = updated.load.cap || {};
+  if (!updated.load.cap.date) updated.load.cap.date = updated.date || new Date().toISOString().slice(0, 10);
 
-  // Fuel Voucher
+  // Fuel Voucher (All times in UTC)
   updated.fuel = updated.fuel || {};
   if (overwrite || !updated.fuel.required) updated.fuel.required = D.fuel.ramp;
-  updated.fuel.massUnit = D.units;
+  if (overwrite || !updated.fuel.actualDep) updated.fuel.actualDep = D.fuel.ramp;
+  updated.fuel.massUnit = D.units || 'KG';
+  updated.fuel.station = D.org || updated.dep;
+  updated.fuel.date = updated.date || new Date().toISOString().slice(0, 10);
+  if (D.out) {
+    const [h, m] = D.out.split(':').map(Number);
+    const tot = (h || 0) * 60 + (m || 0);
+    const pad = n => String(n).padStart(2, '0');
+    const fmt = mins => {
+      const p = (mins + 1440) % 1440;
+      return `${pad(Math.floor(p / 60))}:${pad(p % 60)}`;
+    };
+    if (!updated.fuel.start) updated.fuel.start = fmt(tot - 25);
+    if (!updated.fuel.stop) updated.fuel.stop = fmt(tot - 10);
+  }
 
-  // Times
+  // Times (UTC Zulu Planned)
   updated.times = updated.times || { plan: {} };
   updated.times.plan = {
     out: D.out || '',
@@ -166,27 +185,22 @@ export function applyOFPToFlight(flight, parsedOFP, overwrite = true) {
     txi: D.txi || '8'
   };
 
-  // Tech log first row
+  // Tech Log first row (Pre-filled with SimBrief UTC Block & Flight Times)
   updated.tech = updated.tech || { flightRows: [] };
-  if (!updated.tech.flightRows || updated.tech.flightRows.length === 0) {
-    updated.tech.flightRows = [{
-      fltNo: D.fn || updated.flightNo,
-      date: updated.date,
-      dep: D.org,
-      arr: D.dst,
-      out: '',
-      off: '',
-      on: '',
-      in: '',
-      ldgs: '1',
-      pic: '',
-      remarks: ''
-    }];
-  } else {
-    updated.tech.flightRows[0].fltNo = D.fn || updated.flightNo;
-    updated.tech.flightRows[0].dep = D.org;
-    updated.tech.flightRows[0].arr = D.dst;
-  }
+  const firstRow = (updated.tech.flightRows && updated.tech.flightRows[0]) || {};
+  updated.tech.flightRows = [{
+    fltNo: D.fn || updated.flightNo || updated.callsign || '',
+    date: updated.date || new Date().toISOString().slice(0, 10),
+    dep: D.org || updated.dep || '',
+    arr: D.dst || updated.arr || '',
+    out: firstRow.out || D.out || '',
+    off: firstRow.off || D.off || '',
+    on: firstRow.on || D.on || '',
+    in: firstRow.in || D.in || '',
+    ldgs: firstRow.ldgs || '1',
+    pic: firstRow.pic || 'Self',
+    remarks: firstRow.remarks || 'Uplinked from SimBrief OFP (UTC)'
+  }];
 
   // SimBrief state
   updated.sb = {

@@ -77,11 +77,20 @@ function calcDelayPill(planStr, actStr) {
 }
 
 function statusOf(F) {
+  if (!F) return 'Planning';
   if (F.post && F.post.completed) return 'Completed';
+  if (F.vatsimPhase) return F.vatsimPhase;
+  if (F.vatsimLive?.online && F.vatsimLive?.phase) return F.vatsimLive.phase;
   const d = F.done || {};
-  if (d.comms) return 'Postflight';
-  if (d.load || d.fuel || d.tech) return 'Ground';
-  if (d.pre) return 'Briefed';
+  if (d.post) return 'Completed';
+  if (F.times?.actual?.in) return 'Arrived / Gate';
+  if (F.times?.actual?.on) return 'Landed';
+  if (F.times?.actual?.off) return 'Airborne';
+  if (F.times?.actual?.out) return 'Departed / Taxi';
+  if (d.times && d.comms) return 'Postflight';
+  if (d.comms) return 'Enroute';
+  if (d.load || d.fuel || d.tech) return 'Ready for Push';
+  if (d.pre || d.sb) return 'Briefed';
   return 'Planning';
 }
 
@@ -208,6 +217,44 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
       handleFetchOFP(sbUser, true);
     }
   }, [F.id]);
+
+  // Live VATSIM Telemetry & Flight Phase Polling (every 20s)
+  useEffect(() => {
+    const cs = F?.callsign;
+    if (!cs) return;
+    let isMounted = true;
+
+    const checkVatsim = async () => {
+      try {
+        const pilot = await api.getVatsimPilot(cs);
+        if (isMounted && pilot && pilot.found) {
+          setF(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              vatsimPhase: pilot.flightPhase || pilot.phase || prev.vatsimPhase,
+              vatsimLive: {
+                online: true,
+                phase: pilot.flightPhase || pilot.phase,
+                gs: pilot.groundspeed,
+                alt: pilot.altitude,
+                heading: pilot.heading
+              }
+            };
+          });
+        }
+      } catch (e) {
+        // Not online or lookup failed
+      }
+    };
+
+    checkVatsim();
+    const interval = setInterval(checkVatsim, 20000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [F?.callsign]);
 
   // Flush pending save on unmount
   useEffect(() => {
@@ -355,10 +402,34 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
           });
         }
 
+        // Fuel Voucher (UTC)
         if (!next.fuel) next.fuel = {};
         next.fuel.required = D.fuel.ramp;
+        next.fuel.actualDep = D.fuel.ramp;
+        next.fuel.station = D.org || next.dep;
         next.fuel.massUnit = D.units === 'lbs' ? 'LBS' : 'KG';
+        next.fuel.date = next.date || new Date().toISOString().slice(0, 10);
+        if (D.out) {
+          const [h, m] = D.out.split(':').map(Number);
+          const tot = (h || 0) * 60 + (m || 0);
+          const pad = n => String(n).padStart(2, '0');
+          const fmt = mins => {
+            const p = (mins + 1440) % 1440;
+            return `${pad(Math.floor(p / 60))}:${pad(p % 60)}`;
+          };
+          next.fuel.start = fmt(tot - 25);
+          next.fuel.stop = fmt(tot - 10);
+        }
 
+        // Loadsheet Dispatch & Captain Sign (UTC)
+        if (!next.load) next.load = {};
+        if (!next.load.disp) next.load.disp = {};
+        next.load.disp.time = D.out || next.load.disp.time || '';
+        next.load.disp.sig = next.load.disp.sig || 'OFP DISPATCH';
+        if (!next.load.cap) next.load.cap = {};
+        next.load.cap.date = next.date || new Date().toISOString().slice(0, 10);
+
+        // Times & Delay Planned (UTC Zulu)
         if (!next.times) next.times = { plan: {} };
         if (!next.times.plan) next.times.plan = {};
         next.times.plan.out = D.out;
@@ -368,15 +439,20 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
         next.times.plan.txo = D.txo || '20';
         next.times.plan.txi = D.txi || '8';
 
+        // Tech Log first row (Pre-filled with SimBrief UTC Block & Flight Times)
         if (!next.tech) next.tech = {};
         if (!next.tech.flightRows || !next.tech.flightRows.length) next.tech.flightRows = [{}];
-        next.tech.flightRows[0].fltNo = D.fn || next.tech.flightRows[0].fltNo;
+        next.tech.flightRows[0].fltNo = D.fn || next.tech.flightRows[0].fltNo || next.callsign || '';
         next.tech.flightRows[0].dep = D.org || next.tech.flightRows[0].dep;
         next.tech.flightRows[0].arr = D.dst || next.tech.flightRows[0].arr;
-        if (!next.tech.flightRows[0].out) next.tech.flightRows[0].out = D.out || '';
-        if (!next.tech.flightRows[0].off) next.tech.flightRows[0].off = D.off || '';
-        if (!next.tech.flightRows[0].on) next.tech.flightRows[0].on = D.on || '';
-        if (!next.tech.flightRows[0].in) next.tech.flightRows[0].in = D.in || '';
+        next.tech.flightRows[0].date = next.date || new Date().toISOString().slice(0, 10);
+        next.tech.flightRows[0].out = D.out || next.tech.flightRows[0].out || '';
+        next.tech.flightRows[0].off = D.off || next.tech.flightRows[0].off || '';
+        next.tech.flightRows[0].on = D.on || next.tech.flightRows[0].on || '';
+        next.tech.flightRows[0].in = D.in || next.tech.flightRows[0].in || '';
+        next.tech.flightRows[0].ldgs = next.tech.flightRows[0].ldgs || '1';
+        next.tech.flightRows[0].pic = next.tech.flightRows[0].pic || 'Self';
+        next.tech.flightRows[0].remarks = next.tech.flightRows[0].remarks || 'Uplinked from SimBrief OFP (UTC)';
 
         setF(next);
         await flushSave(next);
@@ -637,7 +713,17 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
     <>
       <div className="fhead">
         <div>
-          <p className="eyebrow">{statusOf(F)} · {F.network || 'VATSIM'}</p>
+          <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span className={`pill ${F.vatsimLive?.online ? 'acc' : ''}`} style={{ fontSize: '11px', padding: '2px 8px' }}>
+              {F.vatsimLive?.online ? '✈️ ' : ''}{statusOf(F)}
+            </span>
+            <span>· {F.network || 'VATSIM'}</span>
+            {F.vatsimLive?.online && F.vatsimLive?.gs != null && (
+              <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
+                · {F.vatsimLive.gs} kts · {F.vatsimLive.alt} ft
+              </span>
+            )}
+          </p>
           <h1>
             {F.callsign || 'Flight'} <span className="route">{F.dep || '----'} → {F.arr || '----'}</span>
           </h1>

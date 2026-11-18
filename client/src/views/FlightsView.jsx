@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { applyOFPToFlight } from '../services/simbriefService';
 import { Radio, RefreshCw, Zap, Plus, X, AlertCircle } from 'lucide-react';
 
 const STAGES = [
@@ -19,17 +20,30 @@ function fmtDate(d) {
   return m ? `${+m[3]} ${MON[+m[2] - 1]} ${m[1]}` : (d || '');
 }
 
-function statusOf(F) {
+export function statusOf(F) {
+  if (!F) return 'Planning';
   if (F.post && F.post.completed) return 'Completed';
+  if (F.vatsimPhase) return F.vatsimPhase;
+  if (F.vatsimLive?.online && F.vatsimLive?.phase) return F.vatsimLive.phase;
   const d = F.done || {};
-  if (d.comms) return 'Postflight';
-  if (d.load || d.fuel || d.tech) return 'Ground';
-  if (d.pre) return 'Briefed';
+  if (d.post) return 'Completed';
+  if (F.times?.actual?.in) return 'Arrived / Gate';
+  if (F.times?.actual?.on) return 'Landed';
+  if (F.times?.actual?.off) return 'Airborne';
+  if (F.times?.actual?.out) return 'Departed / Taxi';
+  if (d.times && d.comms) return 'Postflight';
+  if (d.comms) return 'Enroute';
+  if (d.load || d.fuel || d.tech) return 'Ready for Push';
+  if (d.pre || d.sb) return 'Briefed';
   return 'Planning';
 }
 
-function statusCls(s) {
-  return s === 'Completed' ? 'ok' : s === 'Planning' ? '' : 'acc';
+export function statusCls(s) {
+  if (!s || s === 'Planning') return '';
+  if (s === 'Completed') return 'ok';
+  if (s.includes('Cruising') || s.includes('Airborne') || s.includes('Enroute') || s.includes('Online')) return 'acc';
+  if (s.includes('Taxi') || s.includes('Boarding') || s.includes('Ready') || s.includes('Departure') || s.includes('Approach')) return 'warn';
+  return 'acc';
 }
 
 export default function FlightsView({
@@ -109,14 +123,7 @@ export default function FlightsView({
         (a.reg && a.reg.toUpperCase() === targetReg)
       ) || fleet[0];
 
-      const toKg = x => {
-        if (!x) return '';
-        const val = parseFloat(x);
-        if (isNaN(val)) return '';
-        return D.units === 'LBS' ? String(Math.round(val / 2.20462262)) : String(Math.round(val));
-      };
-
-      const flightPayload = {
+      const basePayload = {
         callsign: (D.cs || D.fn || 'SVA123').toUpperCase(),
         flightNo: (D.fn || D.cs || 'SV123').toUpperCase(),
         dep: (D.org || '').toUpperCase(),
@@ -125,45 +132,12 @@ export default function FlightsView({
         date: new Date().toISOString().slice(0, 10),
         network: 'VATSIM',
         ac: matchedAc,
-        aircraftId: matchedAc?.id,
-        pre: {
-          route: D.route || '',
-          cruise: D.fl || '',
-          etd: D.out || '',
-          eta: D.in || '',
-          ofp: `Taxi ${D.fuel?.taxi || ''} · Trip ${D.fuel?.trip || ''} · Block ${D.fuel?.ramp || ''} ${D.units || 'KG'}`,
-          wx: [D.metarO, D.metarD, D.metarA].filter(Boolean).join('\n'),
-          notam: (D.notams && D.notams.length) ? D.notams.join('\n\n').slice(0, 4000) : ''
-        },
-        load: {
-          bew: toKg(D.wt?.oew) || matchedAc?.bew || '',
-          paxCount: D.wt?.pax || '',
-          block: toKg(D.fuel?.ramp),
-          taxi: toKg(D.fuel?.taxi),
-          trip: toKg(D.fuel?.trip)
-        },
-        fuel: {
-          required: D.fuel?.ramp || '',
-          massUnit: D.units || 'KG'
-        },
-        times: {
-          plan: {
-            out: D.out || '',
-            off: D.off || '',
-            on: D.on || '',
-            in: D.in || '',
-            txo: D.txo || '15',
-            txi: D.txi || '8'
-          }
-        },
-        sb: {
-          user: targetUser,
-          at: Date.now(),
-          d: D,
-          fixes: ofpRes.fixes || [],
-          text: ofpRes.text || ''
-        }
+        aircraftId: matchedAc?.id
       };
+
+      // Fully uplink and compute all section UTC times via applyOFPToFlight
+      const flightPayload = applyOFPToFlight(basePayload, ofpRes, true);
+      if (flightPayload.sb) flightPayload.sb.user = targetUser;
 
       setUplinkStatus(`Creating sector ${flightPayload.callsign} (${flightPayload.dep} → ${flightPayload.arr})...`);
       const created = await api.createFlight(flightPayload);
@@ -630,7 +604,14 @@ export default function FlightsView({
                       <span className="note" style={{ margin: 0 }}>{F.ac?.typeLabel}</span>
                     </td>
                     <td>
-                      <span className={`pill ${statusCls(s)}`}>{s}</span>
+                      <span className={`pill ${statusCls(s)}`}>
+                        {F.vatsimLive?.online ? '✈️ ' : ''}{s}
+                      </span>
+                      {F.vatsimLive?.online && F.vatsimLive?.gs != null && (
+                        <span className="note" style={{ margin: '2px 0 0 0', display: 'block', fontSize: '11px', color: 'var(--accent)' }}>
+                          {F.vatsimLive.gs} kt · {F.vatsimLive.alt} ft
+                        </span>
+                      )}
                     </td>
                     <td>
                       <span className="dots" aria-label="Stages done">

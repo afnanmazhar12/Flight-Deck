@@ -29,8 +29,20 @@ export default function App() {
   // Initial Load & Refresh
   useEffect(() => {
     refreshAll();
-    const interval = setInterval(refreshStatus, 20000);
-    return () => clearInterval(interval);
+    const statusInterval = setInterval(refreshStatus, 20000);
+    const flightsInterval = setInterval(async () => {
+      if (currentUser?.id) {
+        try {
+          const flts = await api.getFlights();
+          if (flts) setFlights(flts);
+        } catch (e) {}
+      }
+    }, 25000);
+
+    return () => {
+      clearInterval(statusInterval);
+      clearInterval(flightsInterval);
+    };
   }, [currentUser?.id]);
 
   const refreshAll = async () => {
