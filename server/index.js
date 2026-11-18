@@ -9,6 +9,11 @@ require('dotenv').config();
 const Flight = require('./models/Flight');
 const Fleet = require('./models/Fleet');
 const Logbook = require('./models/Logbook');
+const User = require('./models/User');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'flightdesk-aviation-jwt-secret-key-2026';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -334,8 +339,356 @@ async function getVatsimData() {
 }
 
 // -----------------------------------------------------------------------------
-// API Routes
+// Auth & User Helper
 // -----------------------------------------------------------------------------
+function getAuthUser(req) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.split(' ')[1];
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch (e) {
+    return null;
+  }
+}
+
+app.use((req, res, next) => {
+  req.user = getAuthUser(req);
+  next();
+});
+
+async function seedFleetForUser(userId) {
+  const p1 = {
+    id: `ac_a320_${userId}`,
+    userId,
+    reg: 'D-ABNL',
+    make: 'Airbus',
+    group: 'Airbus A320',
+    variant: 'A320-200',
+    typeLabel: 'Airbus A320-200',
+    icao: 'A320',
+    tpl: 'a320',
+    exact: true,
+    operator: 'Eurowings',
+    base: 'EDDL',
+    config: 'Y180 / C12Y138',
+    taxiFuel: '150',
+    fuelCap: '18720',
+    limits: { mrw: '77400', mtow: '77000', mlw: '66000', mzfw: '62500' },
+    tanks: [
+      { name: 'Outer + Inner Left', max: '6250' },
+      { name: 'Center Tank', max: '6470' },
+      { name: 'Inner + Outer Right', max: '6250' }
+    ],
+    holds: [
+      { name: 'Hold 1 (Fwd)', limit: '2270', group: 1 },
+      { name: 'Hold 3 (Aft)', limit: '1900', group: 2 },
+      { name: 'Hold 4 (Aft)', limit: '1502', group: 2 },
+      { name: 'Hold 5 (Bulk / Loose)', limit: '1497', group: 2 }
+    ],
+    zones: [
+      { name: 'Zone OA (Rows 1-6)' },
+      { name: 'Zone OB (Rows 7-13)' },
+      { name: 'Zone OC (Rows 14-22)' },
+      { name: 'Zone OD (Rows 23-30)' }
+    ],
+    airframeHrs: '271.4',
+    landings: '0',
+    eng1Hrs: '0',
+    eng2Hrs: '0',
+    apuHrs: '0',
+    history: [
+      { flt: 'EWG6892', pilot: 'Francesco', dep: 'LEPA', arr: 'EDDM', when: '3 days ago', dur: '1:48', remarks: 'Lav 2 smoke detector fault at boarding. Reset, did not recur.' },
+      { flt: 'EWG6839', pilot: 'Karl S.', dep: 'EDLP', arr: 'LEPA', when: '9 days ago', dur: '1:57', remarks: 'Cabin reading light row 14 inop. Cabin log entry made.' }
+    ],
+    created: Date.now()
+  };
+
+  const p2 = {
+    id: `ac_b777_${userId}`,
+    userId,
+    reg: 'HZ-AK11',
+    make: 'Boeing',
+    group: 'Boeing 777',
+    variant: '777-300ER',
+    typeLabel: 'Boeing 777-300ER',
+    icao: 'B77W',
+    tpl: 'b777',
+    exact: true,
+    operator: 'Saudia',
+    base: 'OEJN',
+    config: 'F8C42Y304 / C28Y368',
+    taxiFuel: '500',
+    fuelCap: '145500',
+    limits: { mrw: '352441', mtow: '351534', mlw: '251290', mzfw: '237682' },
+    tanks: [
+      { name: 'Left Main Tank', max: '31300' },
+      { name: 'Center Main Tank', max: '82900' },
+      { name: 'Right Main Tank', max: '31300' }
+    ],
+    holds: [
+      { name: 'Hold 1 (Fwd Pallets)', limit: '25000', group: 1 },
+      { name: 'Hold 2 (Fwd Container)', limit: '21000', group: 1 },
+      { name: 'Hold 3 (Aft Container)', limit: '18000', group: 2 },
+      { name: 'Hold 4 (Aft Loose/Bulk)', limit: '3000', group: 2 }
+    ],
+    zones: [
+      { name: 'Zone A (First / Business)' },
+      { name: 'Zone B (Business / Premium)' },
+      { name: 'Zone C (Economy Fwd)' },
+      { name: 'Zone D (Economy Mid)' },
+      { name: 'Zone E (Economy Aft)' }
+    ],
+    airframeHrs: '1420.5',
+    landings: '312',
+    eng1Hrs: '1420.5',
+    eng2Hrs: '1420.5',
+    apuHrs: '1105.0',
+    created: Date.now()
+  };
+
+  const p3 = {
+    id: `ac_b738_${userId}`,
+    userId,
+    reg: 'D-AIDV',
+    make: 'Boeing',
+    group: 'Boeing 737',
+    variant: '737-800',
+    typeLabel: 'Boeing 737-800',
+    icao: 'B738',
+    tpl: 'b737',
+    exact: true,
+    operator: 'Eurowings',
+    base: 'EDDL',
+    config: 'Y189 / C12Y150',
+    taxiFuel: '200',
+    fuelCap: '20890',
+    limits: { mrw: '79242', mtow: '79015', mlw: '66361', mzfw: '62731' },
+    tanks: [
+      { name: 'Main Tank 1 (Left)', max: '3915' },
+      { name: 'Center Tank', max: '13060' },
+      { name: 'Main Tank 2 (Right)', max: '3915' }
+    ],
+    holds: [
+      { name: 'Hold 1 (Fwd)', limit: '1361', group: 1 },
+      { name: 'Hold 2 (Fwd)', limit: '2041', group: 1 },
+      { name: 'Hold 3 (Aft)', limit: '2268', group: 2 },
+      { name: 'Hold 4 (Aft / Bulk)', limit: '1247', group: 2 }
+    ],
+    zones: [
+      { name: 'Zone A (Rows 1-6)' },
+      { name: 'Zone B (Rows 7-15)' },
+      { name: 'Zone C (Rows 16-24)' },
+      { name: 'Zone D (Rows 25-33)' }
+    ],
+    airframeHrs: '890.0',
+    landings: '540',
+    eng1Hrs: '890.0',
+    eng2Hrs: '890.0',
+    apuHrs: '620.0',
+    created: Date.now()
+  };
+
+  const starter = [p1, p2, p3];
+  for (const plane of starter) {
+    localStore.fleet[plane.id] = plane;
+    if (mongoStatus.connected) {
+      await Fleet.findOneAndUpdate({ id: plane.id }, plane, { upsert: true, new: true });
+    }
+  }
+  saveLocalStore();
+  return starter;
+}
+
+// -----------------------------------------------------------------------------
+// Authentication Endpoints
+// -----------------------------------------------------------------------------
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { username, email, password, callsign, simbriefUser } = req.body || {};
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Username, email and password are required' });
+    }
+    const cleanUser = username.trim().toLowerCase();
+    const cleanEmail = email.trim().toLowerCase();
+    if (cleanUser.length < 3) {
+      return res.status(400).json({ error: 'Username must be at least 3 characters' });
+    }
+    if (password.length < 4) {
+      return res.status(400).json({ error: 'Password must be at least 4 characters' });
+    }
+
+    if (mongoStatus.connected) {
+      const existing = await User.findOne({
+        $or: [{ username: cleanUser }, { email: cleanEmail }]
+      });
+      if (existing) {
+        return res.status(400).json({ error: 'Username or email is already registered' });
+      }
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const userId = 'usr_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+
+    const userObj = {
+      id: userId,
+      username: cleanUser,
+      email: cleanEmail,
+      password: hashedPassword,
+      callsign: callsign ? callsign.trim().toUpperCase() : cleanUser.toUpperCase(),
+      simbriefUser: simbriefUser ? simbriefUser.trim() : cleanUser,
+      createdAt: new Date()
+    };
+
+    if (mongoStatus.connected) {
+      await User.create(userObj);
+    }
+    if (!localStore.users) localStore.users = {};
+    localStore.users[userId] = userObj;
+    saveLocalStore();
+
+    // Automatically seed personal fleet for the new pilot
+    await seedFleetForUser(userId);
+
+    const token = jwt.sign(
+      { id: userId, username: cleanUser, email: cleanEmail },
+      JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+
+    res.status(201).json({
+      success: true,
+      token,
+      user: {
+        id: userId,
+        username: cleanUser,
+        email: cleanEmail,
+        callsign: userObj.callsign,
+        simbriefUser: userObj.simbriefUser
+      }
+    });
+  } catch (err) {
+    console.error('[Register Error]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { login, password } = req.body || {};
+    if (!login || !password) {
+      return res.status(400).json({ error: 'Username/Email and password are required' });
+    }
+    const cleanLogin = login.trim().toLowerCase();
+
+    let user = null;
+    if (mongoStatus.connected) {
+      user = await User.findOne({
+        $or: [{ username: cleanLogin }, { email: cleanLogin }]
+      });
+    }
+    if (!user && localStore.users) {
+      user = Object.values(localStore.users).find(
+        u => u.username === cleanLogin || u.email === cleanLogin
+      );
+    }
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid username/email or password' });
+    }
+
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+      return res.status(401).json({ error: 'Invalid username/email or password' });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, username: user.username, email: user.email },
+      JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        callsign: user.callsign,
+        simbriefUser: user.simbriefUser
+      }
+    });
+  } catch (err) {
+    console.error('[Login Error]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/me', async (req, res) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  try {
+    let user = null;
+    if (mongoStatus.connected) {
+      user = await User.findOne({ id: req.user.id }).lean();
+    }
+    if (!user && localStore.users) {
+      user = localStore.users[req.user.id];
+    }
+    if (!user) {
+      return res.json({ user: req.user });
+    }
+    res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        callsign: user.callsign,
+        simbriefUser: user.simbriefUser
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/auth/profile', async (req, res) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  try {
+    const { callsign, simbriefUser } = req.body || {};
+    const updates = {};
+    if (callsign !== undefined) updates.callsign = callsign.trim().toUpperCase();
+    if (simbriefUser !== undefined) updates.simbriefUser = simbriefUser.trim();
+
+    let updated = null;
+    if (mongoStatus.connected) {
+      updated = await User.findOneAndUpdate({ id: req.user.id }, updates, { new: true }).lean();
+    }
+    if (localStore.users && localStore.users[req.user.id]) {
+      localStore.users[req.user.id] = { ...localStore.users[req.user.id], ...updates };
+      saveLocalStore();
+      updated = localStore.users[req.user.id];
+    }
+
+    res.json({
+      success: true,
+      user: {
+        id: req.user.id,
+        username: req.user.username,
+        email: req.user.email,
+        callsign: updated?.callsign || '',
+        simbriefUser: updated?.simbriefUser || ''
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 function maskUri(uri) {
   if (!uri) return '';
@@ -404,13 +757,14 @@ app.post('/api/settings', (req, res) => {
 // Auto-fetching Callsign based upon last flight
 // -----------------------------------------------------------------------------
 app.get('/api/flights/suggest-callsign', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     let lastFlight = null;
     if (mongoStatus.connected) {
-      lastFlight = await Flight.findOne().sort({ created: -1 }).lean();
+      lastFlight = await Flight.findOne({ userId }).sort({ created: -1 }).lean();
     }
     if (!lastFlight) {
-      const all = Object.values(localStore.flights).sort((a, b) => (b.created || 0) - (a.created || 0));
+      const all = Object.values(localStore.flights).filter(f => (f.userId || 'guest') === userId).sort((a, b) => (b.created || 0) - (a.created || 0));
       if (all.length > 0) lastFlight = all[0];
     }
 
@@ -469,15 +823,18 @@ app.get('/api/flights/suggest-callsign', async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// Flights CRUD
+// Flights CRUD (Segregated per Pilot / User)
 // -----------------------------------------------------------------------------
 app.get('/api/flights', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     if (mongoStatus.connected) {
-      const flights = await Flight.find().sort({ created: -1 }).lean();
+      const flights = await Flight.find({ userId }).sort({ created: -1 }).lean();
       return res.json(flights);
     }
-    const list = Object.values(localStore.flights).sort((a, b) => (b.created || 0) - (a.created || 0));
+    const list = Object.values(localStore.flights)
+      .filter(f => (f.userId || 'guest') === userId)
+      .sort((a, b) => (b.created || 0) - (a.created || 0));
     res.json(list);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -487,19 +844,20 @@ app.get('/api/flights', async (req, res) => {
 app.get('/api/flights/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user ? req.user.id : 'guest';
     if (mongoStatus.connected) {
-      const flt = await Flight.findOne({ id }).lean();
+      const flt = await Flight.findOne({ id, userId }).lean();
       if (flt) return res.json(flt);
     }
     const flt = localStore.flights[id];
-    if (!flt) return res.status(404).json({ error: 'Flight not found' });
+    if (!flt || (flt.userId && flt.userId !== userId)) {
+      return res.status(404).json({ error: 'Flight not found or unauthorized' });
+    }
     res.json(flt);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-
-
 
 function aircraftSnap(A) {
   if (!A) return { id: '', reg: 'N/A', make: '', variant: '', typeLabel: 'Aircraft', icao: 'ACFT', tpl: 'a320', exact: false, operator: '', base: '', config: '', bew: '', taxiFuel: '150', fuelCap: '', limits: {}, tanks: [], holds: [], zones: [] };
@@ -541,28 +899,29 @@ function skeleton() {
   };
 }
 
-
 app.post('/api/flights', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     const data = req.body || {};
     if (!data.id) {
       data.id = 'flt_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
     }
 
-    // Resolve aircraft if passed as string ID or in data.ac / data.aircraftId
+    // Resolve aircraft
     let planeObj = null;
     const acId = typeof data.ac === 'string' ? data.ac : (data.aircraftId || data.ac?.id);
     if (acId) {
       if (mongoStatus.connected) {
-        planeObj = await Fleet.findOne({ id: acId }).lean();
+        planeObj = await Fleet.findOne({ id: acId, userId }).lean();
       }
       if (!planeObj) planeObj = localStore.fleet[acId];
     }
     if (!planeObj && data.ac && typeof data.ac === 'object' && data.ac.reg) {
       planeObj = data.ac;
     }
-    if (!planeObj && Object.keys(localStore.fleet).length > 0) {
-      planeObj = Object.values(localStore.fleet)[0];
+    if (!planeObj) {
+      const userPlanes = Object.values(localStore.fleet).filter(p => (p.userId || 'guest') === userId);
+      planeObj = userPlanes[0];
     }
 
     const acSnap = aircraftSnap(planeObj);
@@ -572,6 +931,7 @@ app.post('/api/flights', async (req, res) => {
       ...skel,
       ...data,
       id: data.id,
+      userId,
       ac: acSnap,
       created: data.created || Date.now(),
       updatedAt: Date.now(),
@@ -617,7 +977,7 @@ app.post('/api/flights', async (req, res) => {
     saveLocalStore();
 
     if (mongoStatus.connected) {
-      await Flight.findOneAndUpdate({ id: flightRecord.id }, flightRecord, { upsert: true, new: true });
+      await Flight.findOneAndUpdate({ id: flightRecord.id, userId }, flightRecord, { upsert: true, new: true });
     }
 
     res.status(201).json(flightRecord);
@@ -626,16 +986,18 @@ app.post('/api/flights', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 app.put('/api/flights/:id', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     const { id } = req.params;
-    const update = { ...req.body, id, updatedAt: Date.now() };
+    const update = { ...req.body, id, userId, updatedAt: Date.now() };
 
     localStore.flights[id] = update;
     saveLocalStore();
 
     if (mongoStatus.connected) {
-      await Flight.findOneAndUpdate({ id }, update, { upsert: true, new: true });
+      await Flight.findOneAndUpdate({ id, userId }, update, { upsert: true, new: true });
     }
 
     res.json(update);
@@ -645,13 +1007,14 @@ app.put('/api/flights/:id', async (req, res) => {
 });
 
 app.delete('/api/flights/:id', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     const { id } = req.params;
     delete localStore.flights[id];
     saveLocalStore();
 
     if (mongoStatus.connected) {
-      await Flight.deleteOne({ id });
+      await Flight.deleteOne({ id, userId });
     }
 
     res.json({ success: true, id });
@@ -661,15 +1024,23 @@ app.delete('/api/flights/:id', async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// Fleet CRUD
+// Fleet CRUD (Segregated per Pilot / User)
 // -----------------------------------------------------------------------------
 app.get('/api/fleet', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     if (mongoStatus.connected) {
-      const fleet = await Fleet.find().sort({ reg: 1 }).lean();
+      let fleet = await Fleet.find({ userId }).sort({ reg: 1 }).lean();
+      if (fleet.length === 0) {
+        fleet = await seedFleetForUser(userId);
+      }
       return res.json(fleet);
     }
-    const list = Object.values(localStore.fleet).sort((a, b) => a.reg.localeCompare(b.reg));
+    let list = Object.values(localStore.fleet).filter(p => (p.userId || 'guest') === userId);
+    if (list.length === 0) {
+      list = await seedFleetForUser(userId);
+    }
+    list.sort((a, b) => a.reg.localeCompare(b.reg));
     res.json(list);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -677,18 +1048,20 @@ app.get('/api/fleet', async (req, res) => {
 });
 
 app.post('/api/fleet', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     const data = req.body;
     if (!data.id) {
-      data.id = 'ac_' + (data.reg || Date.now()).toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+      data.id = 'ac_' + (data.reg || Date.now()).toString().toLowerCase().replace(/[^a-z0-9]/g, '') + '_' + userId.slice(-4);
     }
+    data.userId = userId;
     data.created = data.created || Date.now();
 
     localStore.fleet[data.id] = data;
     saveLocalStore();
 
     if (mongoStatus.connected) {
-      await Fleet.findOneAndUpdate({ id: data.id }, data, { upsert: true, new: true });
+      await Fleet.findOneAndUpdate({ id: data.id, userId }, data, { upsert: true, new: true });
     }
 
     res.status(201).json(data);
@@ -698,15 +1071,16 @@ app.post('/api/fleet', async (req, res) => {
 });
 
 app.put('/api/fleet/:id', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     const { id } = req.params;
-    const update = { ...req.body, id };
+    const update = { ...req.body, id, userId };
 
     localStore.fleet[id] = update;
     saveLocalStore();
 
     if (mongoStatus.connected) {
-      await Fleet.findOneAndUpdate({ id }, update, { upsert: true, new: true });
+      await Fleet.findOneAndUpdate({ id, userId }, update, { upsert: true, new: true });
     }
 
     res.json(update);
@@ -716,13 +1090,14 @@ app.put('/api/fleet/:id', async (req, res) => {
 });
 
 app.delete('/api/fleet/:id', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     const { id } = req.params;
     delete localStore.fleet[id];
     saveLocalStore();
 
     if (mongoStatus.connected) {
-      await Fleet.deleteOne({ id });
+      await Fleet.deleteOne({ id, userId });
     }
 
     res.json({ success: true, id });
@@ -735,11 +1110,12 @@ app.delete('/api/fleet/:id', async (req, res) => {
 // LOGBOOKS (Connected to MongoDB with Full Filtering & Archival)
 // -----------------------------------------------------------------------------
 app.get('/api/logbooks', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     const { callsign, reg, airport, network, sort = 'desc' } = req.query;
 
     if (mongoStatus.connected) {
-      const query = {};
+      const query = { userId };
       if (callsign) query.callsign = new RegExp(callsign, 'i');
       if (reg) query.aircraftReg = new RegExp(reg, 'i');
       if (airport) {
@@ -756,7 +1132,7 @@ app.get('/api/logbooks', async (req, res) => {
       return res.json(logs);
     }
 
-    let list = Object.values(localStore.logbooks);
+    let list = Object.values(localStore.logbooks).filter(l => (l.userId || 'guest') === userId);
     if (callsign) {
       const re = new RegExp(callsign, 'i');
       list = list.filter(l => re.test(l.callsign));
@@ -785,12 +1161,13 @@ app.get('/api/logbooks', async (req, res) => {
 });
 
 app.get('/api/logbooks/stats', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     let logs = [];
     if (mongoStatus.connected) {
-      logs = await Logbook.find().lean();
+      logs = await Logbook.find({ userId }).lean();
     } else {
-      logs = Object.values(localStore.logbooks);
+      logs = Object.values(localStore.logbooks).filter(l => (l.userId || 'guest') === userId);
     }
 
     let totalBlockMinutes = 0;
@@ -833,18 +1210,20 @@ app.get('/api/logbooks/stats', async (req, res) => {
 });
 
 app.post('/api/logbooks', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     const data = req.body;
     if (!data.id) {
       data.id = 'log_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
     }
+    data.userId = userId;
     data.created = data.created || Date.now();
 
     localStore.logbooks[data.id] = data;
     saveLocalStore();
 
     if (mongoStatus.connected) {
-      await Logbook.findOneAndUpdate({ id: data.id }, data, { upsert: true, new: true });
+      await Logbook.findOneAndUpdate({ id: data.id, userId }, data, { upsert: true, new: true });
     }
 
     res.status(201).json(data);
@@ -854,11 +1233,12 @@ app.post('/api/logbooks', async (req, res) => {
 });
 
 app.post('/api/logbooks/from-flight/:flightId', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     const { flightId } = req.params;
     let flight = null;
     if (mongoStatus.connected) {
-      flight = await Flight.findOne({ id: flightId }).lean();
+      flight = await Flight.findOne({ id: flightId, userId }).lean();
     }
     if (!flight) flight = localStore.flights[flightId];
 
@@ -946,6 +1326,7 @@ app.post('/api/logbooks/from-flight/:flightId', async (req, res) => {
       cruise: flight.pre?.cruise || '',
       remarks: flight.post?.notes || techRow.remarks || '',
       status: 'Verified',
+      userId,
       created: Date.now()
     };
 
@@ -953,7 +1334,7 @@ app.post('/api/logbooks/from-flight/:flightId', async (req, res) => {
     saveLocalStore();
 
     if (mongoStatus.connected) {
-      await Logbook.findOneAndUpdate({ id: logEntry.id }, logEntry, { upsert: true, new: true });
+      await Logbook.findOneAndUpdate({ id: logEntry.id, userId }, logEntry, { upsert: true, new: true });
     }
 
     res.status(201).json(logEntry);
@@ -963,13 +1344,14 @@ app.post('/api/logbooks/from-flight/:flightId', async (req, res) => {
 });
 
 app.delete('/api/logbooks/:id', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
   try {
     const { id } = req.params;
     delete localStore.logbooks[id];
     saveLocalStore();
 
     if (mongoStatus.connected) {
-      await Logbook.deleteOne({ id });
+      await Logbook.deleteOne({ id, userId });
     }
 
     res.json({ success: true, id });

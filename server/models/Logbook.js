@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const LogbookSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true, index: true },
+  userId: { type: String, default: 'public', index: true },
   flightId: { type: String, default: '', index: true },
   date: { type: String, required: true, index: true },
   callsign: { type: String, required: true, index: true },

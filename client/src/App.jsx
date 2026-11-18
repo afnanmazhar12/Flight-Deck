@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import MongoStatusModal from './components/MongoStatusModal';
+import AuthModal from './components/AuthModal';
 import LaunchpadView from './views/LaunchpadView';
 import FlightsView from './views/FlightsView';
 import ActiveFlightView from './views/ActiveFlightView';
@@ -16,6 +17,9 @@ export default function App() {
   const [activeAircraftId, setActiveAircraftId] = useState(null);
   const [activeVatsimCallsign, setActiveVatsimCallsign] = useState('');
 
+  const [currentUser, setCurrentUser] = useState(() => api.getCurrentUser());
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(() => !api.getCurrentUser());
+
   const [flights, setFlights] = useState([]);
   const [fleet, setFleet] = useState([]);
   const [mongoStatus, setMongoStatus] = useState(null);
@@ -26,7 +30,7 @@ export default function App() {
     refreshAll();
     const interval = setInterval(refreshStatus, 20000);
     return () => clearInterval(interval);
-  }, []);
+  }, [currentUser?.id]);
 
   const refreshAll = async () => {
     try {
@@ -50,6 +54,21 @@ export default function App() {
     } catch (err) {
       // offline
     }
+  };
+
+  const handleAuthSuccess = (user) => {
+    setCurrentUser(user);
+    setIsAuthModalOpen(false);
+    refreshAll();
+  };
+
+  const handleLogout = () => {
+    api.logout();
+    setCurrentUser(null);
+    setFlights([]);
+    setFleet([]);
+    setIsAuthModalOpen(true);
+    refreshAll();
   };
 
   const handleOpenFlight = (id) => {
@@ -83,6 +102,9 @@ export default function App() {
         }}
         mongoStatus={mongoStatus}
         onOpenMongoModal={() => setIsMongoModalOpen(true)}
+        currentUser={currentUser}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onLogout={handleLogout}
       />
 
       <div className="wrap">
@@ -156,6 +178,13 @@ export default function App() {
         onClose={() => setIsMongoModalOpen(false)}
         mongoStatus={mongoStatus}
         onStatusChange={(newStatus) => setMongoStatus(newStatus)}
+      />
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onAuthSuccess={handleAuthSuccess}
+        canClose={!!currentUser}
       />
     </>
   );

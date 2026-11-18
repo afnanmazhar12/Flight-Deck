@@ -1,8 +1,9 @@
 const mongoose = require('mongoose');
 
 const FleetSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true, index: true },
-  reg: { type: String, required: true, unique: true, index: true },
+  id: { type: String, required: true, index: true },
+  userId: { type: String, default: 'public', index: true },
+  reg: { type: String, required: true, index: true },
   make: { type: String, default: '' },
   group: { type: String, default: '' },
   variant: { type: String, default: '' },
