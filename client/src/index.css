@@ -512,3 +512,24 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   align-items: center;
   gap: 6px;
 }
+
+.radar-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(0, 195, 255, 0.12);
+  border: 1px solid rgba(0, 195, 255, 0.35);
+  color: var(--accent);
+  font: 600 11px var(--f-mono);
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all .15s ease;
+}
+.radar-tag:hover {
+  background: rgba(0, 195, 255, 0.25);
+  border-color: var(--accent);
+  color: #fff;
+}

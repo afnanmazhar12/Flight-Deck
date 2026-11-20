@@ -290,5 +290,12 @@ export const api = {
     const res = await authFetch(`${BASE_URL}/vatsim/data`);
     if (!res.ok) throw new Error('Failed to get VATSIM data');
     return res.json();
+  },
+
+  // Aircraft Radar & Tracking
+  async getAircraftRadarHistory(registration) {
+    const res = await authFetch(`${BASE_URL}/radar/aircraft/${encodeURIComponent(registration)}`);
+    if (!res.ok) throw new Error('Failed to fetch aircraft radar history');
+    return res.json();
   }
 };

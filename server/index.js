@@ -1637,6 +1637,40 @@ app.get('/api/simbrief-pdf', async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
+// AIRCRAFT RADAR & FLIGHTRADAR24 TRACKING API
+// -----------------------------------------------------------------------------
+app.get('/api/radar/aircraft/:reg', async (req, res) => {
+  try {
+    const reg = (req.params.reg || '').trim().toUpperCase();
+    if (!reg) return res.status(400).json({ error: 'Registration is required' });
+
+    let plane = null;
+    if (mongoStatus.connected) {
+      plane = await Fleet.findOne({ reg }).lean();
+    }
+    if (!plane) {
+      plane = Object.values(localStore.fleet).find(p => p.reg && p.reg.toUpperCase() === reg);
+    }
+
+    const cleanReg = reg.replace(/[^A-Z0-9-]/g, '');
+    const cleanLower = cleanReg.toLowerCase();
+
+    res.json({
+      registration: cleanReg,
+      aircraft: plane || null,
+      links: {
+        flightradar24: `https://www.flightradar24.com/data/aircraft/${cleanLower}`,
+        radarbox: `https://www.radarbox.com/data/registration/${cleanReg}`,
+        flightaware: `https://www.flightaware.com/live/flight/${cleanReg}`
+      },
+      flightradar24Url: `https://www.flightradar24.com/data/aircraft/${cleanLower}`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
 // VATSIM LIVE RADAR & TELEMETRY API
 // -----------------------------------------------------------------------------
 app.get('/api/vatsim/data', async (req, res) => {
