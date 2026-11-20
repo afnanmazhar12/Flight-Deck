@@ -30,6 +30,22 @@ export function getAirframeCategory(ac = {}, flight = {}) {
   return 'general';
 }
 
+export function hashReg(reg) {
+  const s = String(reg || 'TAIL').toUpperCase();
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+const HOUR_PLACEHOLDERS = new Set(['', '0', '0.0', '271.4', '890.0', '1420.5', '1105.0', '620.0']);
+
+export function isPlaceholderHours(value) {
+  return HOUR_PLACEHOLDERS.has(String(value == null ? '' : value).trim());
+}
+
 // -----------------------------------------------------------------------------
 // 2. Airline / Carrier Detection
 // -----------------------------------------------------------------------------
@@ -119,6 +135,33 @@ export function detectAirlineInfo(ac = {}, flight = {}) {
         { flt: 'QTR701', dep: 'OTHH', arr: 'KJFK', dur: '13:30' },
         { flt: 'QTR816', dep: 'OTHH', arr: 'VHHH', dur: '7:40' },
         { flt: 'QTR039', dep: 'OTHH', arr: 'EDDF', dur: '6:25' }
+      ]
+    };
+  }
+
+  // Finnair
+  if (cs.startsWith('FIN') || cs.startsWith('AY') || op.includes('FINNAIR') || reg.startsWith('OH-')) {
+    return {
+      name: 'Finnair',
+      code: 'AY',
+      icao: 'FIN',
+      hub: 'EFHK',
+      hubCity: 'Helsinki',
+      secondHub: 'EFHK',
+      secondHubCity: 'Helsinki',
+      authority: 'Traficom / EASA',
+      amo: 'FINNAIR TECHNICAL SERVICES (HEL)',
+      licencePrefix: 'EASA-Part66',
+      auditRef: 'TRAFICOM-AMO-014',
+      captains: ['Capt. Mikko Laine', 'Capt. Anna Virtanen', 'Capt. Jari Korhonen', 'Capt. Sami Nieminen'],
+      routes: [
+        { flt: 'FIN831', dep: 'EFHK', arr: 'ESSA', dur: '0:55' },
+        { flt: 'FIN832', dep: 'ESSA', arr: 'EFHK', dur: '0:55' },
+        { flt: 'FIN671', dep: 'EFHK', arr: 'LEMD', dur: '4:35' },
+        { flt: 'FIN672', dep: 'LEMD', arr: 'EFHK', dur: '4:15' },
+        { flt: 'FIN001', dep: 'EFHK', arr: 'EGLL', dur: '3:05' },
+        { flt: 'FIN002', dep: 'EGLL', arr: 'EFHK', dur: '2:50' },
+        { flt: 'FIN047', dep: 'EFHK', arr: 'KJFK', dur: '8:40' }
       ]
     };
   }
@@ -240,6 +283,7 @@ export function generateAirframeHistory(ac = {}, flight = {}, count = 5) {
   const category = getAirframeCategory(ac, flight);
   const carrier = detectAirlineInfo(ac, flight);
   const baseReg = ac.reg || 'HZ-AK11';
+  const seed = hashReg(baseReg);
   const currentDep = (flight.dep || carrier.hub || 'OEJN').toUpperCase();
   const currentDate = flight.date || new Date().toISOString().slice(0, 10);
 
@@ -311,7 +355,8 @@ export function generateAirframeHistory(ac = {}, flight = {}, count = 5) {
     const matching = routesPool.find(r => r.arr === nextArr) || routesPool[i % routesPool.length];
     const depAirport = matching ? matching.dep : (nextArr === carrier.hub ? (carrier.secondHub || 'OERK') : carrier.hub);
     const arrAirport = nextArr;
-    const fltCode = matching ? matching.flt : `${carrier.icao}${100 + i * 2 + 1}`;
+    const rawFlt = matching ? matching.flt : `${carrier.icao}${100 + i * 2 + 1}`;
+    const fltCode = rawFlt.replace(/(\d+)$/, (m) => String(Number(m) + (seed % 7)).padStart(m.length, '0'));
     const duration = matching ? matching.dur : '1:45';
 
     // Calculate dates backwards (e.g. 1 day ago, 2 days ago...)
@@ -322,7 +367,7 @@ export function generateAirframeHistory(ac = {}, flight = {}, count = 5) {
     const whenLabel = i === 0 ? 'Yesterday' : `${i + 1} days ago`;
 
     // Realistic Zulu times for sector
-    const baseHour = (18 - (i * 3) + 24) % 24;
+    const baseHour = (6 + (seed % 12) - (i * 3) + 48) % 24;
     const [durH, durM] = duration.split(':').map(Number);
     const outMin = (15 + i * 7) % 60;
     const outTime = `${pad(baseHour)}:${pad(outMin)}`;
@@ -367,7 +412,7 @@ export function generateAirframeHistory(ac = {}, flight = {}, count = 5) {
 // -----------------------------------------------------------------------------
 // 4. Dynamic Airframe Technical Discrepancies, Defects, MEL & Inspection Specs
 // -----------------------------------------------------------------------------
-export function generateAirframeTechData(ac = {}, flight = {}) {
+function rawAirframeTechData(ac = {}, flight = {}) {
   const category = getAirframeCategory(ac, flight);
   const carrier = detectAirlineInfo(ac, flight);
   const reg = ac.reg || 'HZ-AK11';
@@ -771,7 +816,13 @@ export function generateAirframeTechData(ac = {}, flight = {}) {
     };
   }
 
-  // AIRBUS A320 SPECIFICATION (DEFAULT)
+  const extra = extraAirframePack(category, carrier, flight, ac, fmt);
+  if (extra) return extra;
+
+  const typeName = ac.typeLabel || ac.variant || 'Airbus A320';
+  const neo = /NEO|A20N|A21N/i.test(`${ac.variant || ''} ${ac.icao || ''} ${typeName}`);
+  const a321 = /321/.test(`${ac.variant || ''} ${ac.icao || ''} ${typeName}`);
+  // AIRBUS A320 FAMILY
   return {
     defects: [
       {
@@ -848,15 +899,15 @@ export function generateAirframeTechData(ac = {}, flight = {}) {
     ads: [
       {
         ref: 'EASA AD 2024-0182',
-        eff: 'Airbus A320-214',
+        eff: typeName,
         subject: 'Elevator Aileron Computer (ELAC) software update',
-        method: 'SB A320-27-1244 Rev 02 complied with',
+        method: `SB ${a321 ? 'A321' : 'A320'}-27-1244 Rev 02 complied with`,
         next: 'TERMINATING',
         status: 'COMPLIED'
       },
       {
         ref: 'FAA AD 2025-09-11',
-        eff: 'CFM56-5B Engines',
+        eff: neo ? 'LEAP-1A / PW1100G' : 'CFM56-5B / V2500',
         subject: 'High Pressure Turbine rotor blade inspection',
         method: 'Boroscopic inspection performed 12 SEP 2026',
         next: '400 CYC',
@@ -881,8 +932,8 @@ export function generateAirframeTechData(ac = {}, flight = {}) {
         rem: '15,110 CYC'
       },
       {
-        comp: 'CFM56-5B Stage 1 HPT Disk',
-        pn: '1808M32P01',
+        comp: `${neo ? 'LEAP-1A' : 'CFM56-5B'} Stage 1 HPT Disk`,
+        pn: neo ? '355-001-210-0' : '1808M32P01',
         sn: 'GTE-55219',
         limit: '15,000 CYC',
         acc: '3,850 CYC',
@@ -898,7 +949,341 @@ export function generateAirframeTechData(ac = {}, flight = {}) {
     audit: {
       sig: `${carrier.licencePrefix} / QA-4481`,
       qa: `CERT-CRS-${carrier.hub}-2026`,
-      cert: `${carrier.hub}-MRO-A320`
+      cert: `${carrier.hub}-MRO-${a321 ? 'A321' : 'A320'}`
     }
   };
+}
+
+function extraAirframePack(category, carrier, flight, ac, fmt) {
+  const dep = flight.dep || carrier.hub;
+  const lic = carrier.licencePrefix;
+  const commonCrs = {
+    sig: `${carrier.captains[0]} / A. Mazhar (AME)`,
+    lic: `${lic}-44120`,
+    amo: carrier.amo,
+    dt: `${fmt(0)} 1015Z`
+  };
+  const commonAudit = (code) => ({
+    sig: `${lic} / QA-2204`,
+    qa: `CERT-CRS-${carrier.hub}-2026`,
+    cert: `${carrier.hub}-MRO-${code}`
+  });
+
+  if (category === 'a330') {
+    return {
+      defects: [
+        { item: '1', date: fmt(4), desc: 'ECAM "ENG 1 OIL FILTER CLOG" during climb', action: 'Filter element replaced and leak check satisfactory per AMM 79-21-00.', cert: `${lic}-33011`, status: 'Cleared' },
+        { item: '2', date: fmt(11), desc: 'Blue hydraulic reservoir quantity low on walkaround', action: 'Reservoir serviced. External leak check nil findings.', cert: `${lic}-33042`, status: 'Cleared' }
+      ],
+      mel: [
+        { ref: 'MEL 33-41-01', item: '1', sys: 'Right wing ice inspection light inoperative', cat: 'C', defer: fmt(3), expiry: fmt(-7), sign: `Authorized per MEL 33-41-01 (${lic}-33011)` }
+      ],
+      wo: [
+        { no: 'WO-330-214', sys: 'ATA 79 Oil', removed: 'Oil filter P/N 772B-41 S/N 18820', installed: 'Oil filter P/N 772B-41 S/N 19004', form: 'EASA Form 1' }
+      ],
+      insp: [
+        { check: 'A-Check', interval: '800 HRS / 120 DAYS', last: '210.0 HRS', next: '800.0 HRS', rem: '590.0 HRS', status: 'CURRENT' },
+        { check: 'C-Check', interval: '18 MONTHS / 6000 HRS', last: '02 JUN 2025', next: '02 DEC 2026', rem: '12 MONTHS', status: 'SCHEDULED' },
+        { check: 'ETOPS 180 Service Check', interval: 'PRE-DEPARTURE', last: `${fmt(1)} (${carrier.hub})`, next: `${fmt(0)} (${dep})`, rem: 'VALID', status: 'CURRENT' }
+      ],
+      ads: [
+        { ref: 'EASA AD 2023-0155', eff: ac.typeLabel || 'Airbus A330', subject: 'Trent 700 intermediate pressure compressor borescope', method: 'SB RB.211-72-G890 complied with', next: '500 CYC', status: 'OPEN / MONITORED' }
+      ],
+      life: [
+        { comp: 'Trent 772 Stage 1 HPT Disk', pn: 'FK24745', sn: 'RR-77210', limit: '15,000 CYC', acc: '4,200 CYC', rem: '10,800 CYC' },
+        { comp: 'A330 NLG Shock Absorber', pn: 'D23581100', sn: 'AB-33091', limit: '25,000 CYC', acc: '6,100 CYC', rem: '18,900 CYC' }
+      ],
+      crs: commonCrs,
+      audit: commonAudit('A330')
+    };
+  }
+
+  if (category === 'a350') {
+    return {
+      defects: [
+        { item: '1', date: fmt(2), desc: 'PRIM 2 maintenance message after landing', action: 'PRIM 2 BITE passed per AMM 27-90-00. Message cleared.', cert: `${lic}-35018`, status: 'Cleared' },
+        { item: '2', date: fmt(9), desc: 'Trent XWB oil filter delta-P advisory on cruise', action: 'Filter replaced. Ground run oil pressure normal.', cert: `${lic}-35077`, status: 'Cleared' }
+      ],
+      mel: [
+        { ref: 'MEL 23-11-02', item: '1', sys: 'HF 2 data mode inoperative (HF 1 operational)', cat: 'C', defer: fmt(5), expiry: fmt(-5), sign: `Authorized per MEL 23-11-02 (${lic}-35018)` }
+      ],
+      wo: [
+        { no: 'WO-350-088', sys: 'ATA 79 Oil', removed: 'Scavenge filter P/N XWB-79 S/N 4410', installed: 'Scavenge filter P/N XWB-79 S/N 4488', form: 'EASA Form 1' }
+      ],
+      insp: [
+        { check: 'A-Check', interval: '1000 HRS / 120 DAYS', last: '180.0 HRS', next: '1000.0 HRS', rem: '820.0 HRS', status: 'CURRENT' },
+        { check: 'C-Check', interval: '36 MONTHS', last: '11 MAR 2025', next: '11 MAR 2028', rem: '28 MONTHS', status: 'SCHEDULED' },
+        { check: 'ETOPS 180 Service Check', interval: 'PRE-DEPARTURE', last: `${fmt(0)} (${carrier.hub})`, next: `${fmt(0)} (${dep})`, rem: 'VALID', status: 'CURRENT' }
+      ],
+      ads: [
+        { ref: 'EASA AD 2024-0044', eff: ac.typeLabel || 'Airbus A350', subject: 'Trent XWB fuel manifold inspection', method: 'SB Trent-XWB-73-AK680 complied with', next: 'TERMINATING', status: 'COMPLIED' }
+      ],
+      life: [
+        { comp: 'Trent XWB Stage 1 HPT Disk', pn: 'KH10123', sn: 'XWB-22910', limit: '15,000 CYC', acc: '2,640 CYC', rem: '12,360 CYC' },
+        { comp: 'A350 MLG Sliding Tube', pn: 'D23700100', sn: 'AB-35044', limit: '30,000 CYC', acc: '3,900 CYC', rem: '26,100 CYC' }
+      ],
+      crs: commonCrs,
+      audit: commonAudit('A350')
+    };
+  }
+
+  if (category === 'a380') {
+    return {
+      defects: [
+        { item: '1', date: fmt(6), desc: 'Body gear steering maintenance message on taxi-in', action: 'BGS actuator pressure test satisfactory per AMM 32-51-00.', cert: `${lic}-38021`, status: 'Cleared' },
+        { item: '2', date: fmt(14), desc: 'Upper-deck pack flow low in cruise', action: 'Pack flow sensor cleaned. Flow restored to normal.', cert: `${lic}-38090`, status: 'Cleared' }
+      ],
+      mel: [
+        { ref: 'MEL 25-63-01', item: '1', sys: 'Upper deck galley oven 2 inoperative', cat: 'D', defer: fmt(8), expiry: fmt(-110), sign: `Authorized per MEL 25-63-01 (${lic}-38021)` }
+      ],
+      wo: [
+        { no: 'WO-380-016', sys: 'ATA 32 Landing Gear', removed: 'BGS actuator P/N 10-438201 S/N 772', installed: 'BGS actuator P/N 10-438201 S/N 804', form: 'Dual Release Form' }
+      ],
+      insp: [
+        { check: 'A-Check', interval: '750 HRS / 100 DAYS', last: '90.0 HRS', next: '750.0 HRS', rem: '660.0 HRS', status: 'CURRENT' },
+        { check: 'C-Check', interval: '24 MONTHS', last: '20 AUG 2025', next: '20 AUG 2027', rem: '21 MONTHS', status: 'SCHEDULED' }
+      ],
+      ads: [
+        { ref: 'EASA AD 2022-0210', eff: ac.typeLabel || 'Airbus A380', subject: 'Wing rib foot inspection', method: 'NDT per SB A380-57-8263', next: '6 YEARS', status: 'OPEN / MONITORED' }
+      ],
+      life: [
+        { comp: 'Trent 970 Stage 1 HPT Disk', pn: 'FK32010', sn: 'RR-97044', limit: '12,500 CYC', acc: '3,100 CYC', rem: '9,400 CYC' },
+        { comp: 'A380 Wing Gear Beam Pin', pn: 'D23880020', sn: 'AB-38012', limit: '20,000 CYC', acc: '4,450 CYC', rem: '15,550 CYC' }
+      ],
+      crs: commonCrs,
+      audit: commonAudit('A380')
+    };
+  }
+
+  if (category === 'b747') {
+    return {
+      defects: [
+        { item: '1', date: fmt(5), desc: 'Engine 4 EGT margin lower than fleet average on takeoff', action: 'Trend reviewed. Within AMM limits. No parts replaced.', cert: `${lic}-74730`, status: 'Cleared' },
+        { item: '2', date: fmt(12), desc: 'Body gear steering sluggish during tight turn', action: 'Steering actuator pressure checked normal per AMM 32-51-00.', cert: `${lic}-74761`, status: 'Cleared' }
+      ],
+      mel: [
+        { ref: 'MEL 21-61-02', item: '1', sys: 'Upper deck pack 3 flow indication intermittent', cat: 'C', defer: fmt(2), expiry: fmt(-8), sign: `Authorized per MEL 21-61-02 (${lic}-74730)` }
+      ],
+      wo: [
+        { no: 'WO-747-055', sys: 'ATA 73 Fuel Control', removed: 'EEC channel B P/N 8TC67 S/N 2291', installed: 'EEC channel B P/N 8TC67 S/N 2308', form: 'FAA 8130-3' }
+      ],
+      insp: [
+        { check: 'A-Check', interval: '1000 HRS', last: '400.0 HRS', next: '1000.0 HRS', rem: '600.0 HRS', status: 'CURRENT' },
+        { check: 'C-Check', interval: '7500 HRS / 36 MONTHS', last: '01 FEB 2025', next: '01 FEB 2028', rem: '26 MONTHS', status: 'SCHEDULED' }
+      ],
+      ads: [
+        { ref: 'FAA AD 2020-24-05', eff: ac.typeLabel || 'Boeing 747-8', subject: 'GEnx-2B fuel metering valve inspection', method: 'SB GEnx-2B 73-0034 complied with', next: 'TERMINATING', status: 'COMPLIED' }
+      ],
+      life: [
+        { comp: 'GEnx-2B Stage 1 HPT Disk', pn: '2300M90P02', sn: 'GNX-74702', limit: '15,000 CYC', acc: '2,200 CYC', rem: '12,800 CYC' },
+        { comp: '747 Wing Gear Trunnion', pn: '65B08012', sn: 'BFG-7478', limit: '25,000 CYC', acc: '7,400 CYC', rem: '17,600 CYC' }
+      ],
+      crs: commonCrs,
+      audit: commonAudit('B748')
+    };
+  }
+
+  if (category === 'regional') {
+    return {
+      defects: [
+        { item: '1', date: fmt(2), desc: 'Right engine oil quantity low on preflight', action: 'One quart added. Leak check after ground run satisfactory.', cert: `${lic}-19014`, status: 'Cleared' },
+        { item: '2', date: fmt(7), desc: 'APU start fault on first attempt', action: 'APU start relay reset. Second start normal per AMM 49-11-00.', cert: `${lic}-19033`, status: 'Cleared' }
+      ],
+      mel: [
+        { ref: 'MEL 33-20-01', item: '1', sys: 'Logo light inoperative', cat: 'C', defer: fmt(4), expiry: fmt(-6), sign: `Authorized per MEL 33-20-01 (${lic}-19014)` }
+      ],
+      wo: [
+        { no: 'WO-REG-073', sys: 'ATA 79 Oil', removed: 'Chip detector P/N 5044-01 S/N 118', installed: 'Chip detector P/N 5044-01 S/N 140', form: 'EASA Form 1' }
+      ],
+      insp: [
+        { check: 'A-Check', interval: '500 HRS', last: '80.0 HRS', next: '500.0 HRS', rem: '420.0 HRS', status: 'CURRENT' },
+        { check: 'C-Check', interval: '5000 HRS / 24 MONTHS', last: '18 APR 2025', next: '18 APR 2027', rem: '17 MONTHS', status: 'SCHEDULED' }
+      ],
+      ads: [
+        { ref: 'FAA AD 2018-23-51', eff: ac.typeLabel || 'Regional jet', subject: 'CF34 fan blade dovetail inspection', method: 'Ultrasonic inspection current', next: '800 CYC', status: 'OPEN / MONITORED' }
+      ],
+      life: [
+        { comp: 'CF34 Stage 1 Fan Disk', pn: '6055M21', sn: 'CF34-882', limit: '20,000 CYC', acc: '6,500 CYC', rem: '13,500 CYC' },
+        { comp: 'NLG Drag Brace', pn: '170-710040', sn: 'RG-441', limit: '40,000 CYC', acc: '9,200 CYC', rem: '30,800 CYC' }
+      ],
+      crs: commonCrs,
+      audit: commonAudit('RJ')
+    };
+  }
+
+  if (category === 'general') {
+    return {
+      defects: [
+        { item: '1', date: fmt(3), desc: 'Engine oil level below dispatch band on arrival', action: 'Oil serviced to full. No leak found on idle run.', cert: `${lic}-10021`, status: 'Cleared' },
+        { item: '2', date: fmt(10), desc: 'Autopilot disconnect during approach, no fault stored', action: 'FCC BITE nil faults. Autopilot engaged normally on ground test.', cert: `${lic}-10044`, status: 'Cleared' }
+      ],
+      mel: [
+        { ref: 'MEL 33-10-01', item: '1', sys: 'Taxi light inoperative', cat: 'C', defer: fmt(1), expiry: fmt(-9), sign: `Authorized per MEL 33-10-01 (${lic}-10021)` }
+      ],
+      wo: [
+        { no: 'WO-GEN-019', sys: 'ATA 79 Oil', removed: 'Oil quantity transmitter P/N 10-614 S/N 552', installed: 'Oil quantity transmitter P/N 10-614 S/N 561', form: 'Authorized release' }
+      ],
+      insp: [
+        { check: 'A-Check', interval: '400 HRS', last: '60.0 HRS', next: '400.0 HRS', rem: '340.0 HRS', status: 'CURRENT' },
+        { check: 'C-Check', interval: '24 MONTHS', last: '09 JAN 2025', next: '09 JAN 2027', rem: '2 MONTHS', status: 'SCHEDULED' }
+      ],
+      ads: [
+        { ref: 'AD REVIEW', eff: ac.typeLabel || 'Airframe', subject: 'Applicable AD and SB status reviewed for this type', method: 'Records check current', next: 'NEXT A-CHECK', status: 'COMPLIED' }
+      ],
+      life: [
+        { comp: 'Engine Stage 1 Disk', pn: 'ENG-DISK-01', sn: 'ED-10021', limit: '20,000 CYC', acc: '4,000 CYC', rem: '16,000 CYC' },
+        { comp: 'Nose Landing Gear Cylinder', pn: 'NLG-CYL-02', sn: 'NG-2201', limit: '25,000 CYC', acc: '5,200 CYC', rem: '19,800 CYC' }
+      ],
+      crs: commonCrs,
+      audit: commonAudit('GEN')
+    };
+  }
+
+  return null;
+}
+
+function engineFor(ac, category, seed) {
+  const blob = `${ac.variant || ''} ${ac.typeLabel || ''} ${ac.icao || ''}`.toUpperCase();
+  const neo = /NEO|A20N|A21N/.test(blob);
+  const a321 = /321/.test(blob);
+  if (category === 'a320') {
+    if (neo && a321) return seed % 2 ? 'LEAP-1A32' : 'PW1133G-JM';
+    if (neo) return seed % 2 ? 'LEAP-1A26' : 'PW1127G-JM';
+    if (a321) return seed % 2 ? 'CFM56-5B3/P' : 'V2533-A5';
+    if (/319/.test(blob)) return 'CFM56-5B6/P';
+    return seed % 2 ? 'CFM56-5B4/P' : 'V2527-A5';
+  }
+  const table = {
+    b777: ['GE90-115B', 'GE90-110B1'],
+    b737: [/MAX|B38M|B39M|7M8|7M9/.test(blob) ? 'LEAP-1B28' : 'CFM56-7B26'],
+    b787: ['GEnx-1B74/75', 'Trent 1000-J2'],
+    b747: ['GEnx-2B67', 'CF6-80C2B5F'],
+    a350: [/A35K|1000/.test(blob) ? 'Trent XWB-97' : 'Trent XWB-84'],
+    a330: [/900|A339/.test(blob) ? 'Trent 7000-72' : 'Trent 772B-60'],
+    a380: ['Trent 970-84', 'GP7270'],
+    regional: [/ATR|DH8|DASH/.test(blob) ? 'PW127M' : 'CF34-8C5'],
+    general: ['Turbofan']
+  };
+  const list = table[category] || ['Turbofan'];
+  return list[seed % list.length];
+}
+
+function identityFor(ac, flight) {
+  const category = getAirframeCategory(ac, flight);
+  const seed = hashReg(ac.reg);
+  const wide = ['b777', 'b787', 'b747', 'a330', 'a350', 'a380'].includes(category);
+  const hours = (wide ? 22000 : 9000) + (seed % (wide ? 48000 : 36000));
+  const cycleDiv = wide ? 8.2 : 1.7;
+  const cycles = Math.max(400, Math.round(hours / cycleDiv));
+  const apu = Math.round(hours * 0.72);
+  const e1 = hours + (seed % 80);
+  const e2 = hours + ((seed >> 3) % 80);
+  const msnBase = wide ? 28000 : 1200;
+  const serial = ac.serial && !/^(4152|41528)$/.test(String(ac.serial))
+    ? String(ac.serial)
+    : String(msnBase + (seed % (wide ? 18000 : 7000)));
+  const useStoredHrs = ac.airframeHrs && !isPlaceholderHours(ac.airframeHrs);
+  return {
+    serial,
+    engine: ac.engine && ac.engine !== 'CFM56-5B4' ? ac.engine : engineFor(ac, category, seed),
+    hdr: {
+      afHrs: useStoredHrs ? String(ac.airframeHrs) : hours.toFixed(1),
+      landings: ac.landings && !['', '0', '312', '540'].includes(String(ac.landings)) ? String(ac.landings) : String(cycles),
+      e1: ac.eng1Hrs && !isPlaceholderHours(ac.eng1Hrs) ? String(ac.eng1Hrs) : e1.toFixed(1),
+      e2: ac.eng2Hrs && !isPlaceholderHours(ac.eng2Hrs) ? String(ac.eng2Hrs) : e2.toFixed(1),
+      apu: ac.apuHrs && !isPlaceholderHours(ac.apuHrs) ? String(ac.apuHrs) : apu.toFixed(1)
+    }
+  };
+}
+
+function stampSerial(value, seed, salt) {
+  if (!value) return value;
+  const n = String(10000 + ((seed + salt * 131) % 89999));
+  return String(value).replace(/\d{4,}/, n);
+}
+
+function scaleLife(row, seed, index) {
+  const limit = parseInt(String(row.limit || '').replace(/[^\d]/g, ''), 10) || 20000;
+  const ratio = 0.16 + ((seed >> (index * 2)) % 40) / 100;
+  const acc = Math.min(limit - 200, Math.round(limit * ratio));
+  const fmt = (n) => `${n.toLocaleString('en-US')} CYC`;
+  return {
+    ...row,
+    sn: stampSerial(row.sn, seed, index + 3),
+    acc: fmt(acc),
+    rem: fmt(limit - acc)
+  };
+}
+
+export function generateAirframeTechData(ac = {}, flight = {}) {
+  const category = getAirframeCategory(ac, flight);
+  const seed = hashReg(ac.reg);
+  const raw = rawAirframeTechData(ac, flight);
+  const ident = identityFor(ac, flight);
+  return {
+    ...raw,
+    category,
+    reg: (ac.reg || '').toUpperCase(),
+    serial: ident.serial,
+    engine: ident.engine,
+    hdr: ident.hdr,
+    defects: (raw.defects || []).map((row, i) => ({
+      ...row,
+      cert: stampSerial(row.cert, seed, i + 1) || row.cert,
+      status: i === (seed % Math.max(1, (raw.defects || []).length)) && (seed % 3 === 0) ? 'Deferred' : row.status
+    })),
+    mel: raw.mel || [],
+    wo: (raw.wo || []).map((row, i) => ({
+      ...row,
+      no: stampSerial(row.no, seed, i + 8) || row.no,
+      removed: stampSerial(row.removed, seed, i + 11),
+      installed: stampSerial(row.installed, seed, i + 19)
+    })),
+    life: (raw.life || []).map((row, i) => scaleLife(row, seed, i))
+  };
+}
+
+const TECH_BOOK_PREFIX = 'flightdesk-techbook:';
+
+export function readTechBook(reg) {
+  if (!reg || typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(TECH_BOOK_PREFIX + String(reg).toUpperCase());
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export function writeTechBook(reg, book) {
+  if (!reg || typeof localStorage === 'undefined' || !book) return;
+  try {
+    localStorage.setItem(TECH_BOOK_PREFIX + String(reg).toUpperCase(), JSON.stringify({
+      ...book,
+      reg: String(reg).toUpperCase()
+    }));
+  } catch (e) {}
+}
+
+export function persistAircraftTech(flight) {
+  const reg = flight?.ac?.reg;
+  if (!reg || !flight?.tech?.defects?.length) return;
+  const prev = readTechBook(reg) || {};
+  writeTechBook(reg, {
+    ...prev,
+    category: flight.tech.techCategory || getAirframeCategory(flight.ac, flight),
+    reg: String(reg).toUpperCase(),
+    serial: flight.ac.serial || prev.serial,
+    engine: flight.ac.engine || prev.engine,
+    hdr: flight.tech.hdr || prev.hdr,
+    defects: flight.tech.defects,
+    mel: flight.tech.mel,
+    wo: flight.tech.wo,
+    insp: flight.tech.insp,
+    ads: flight.tech.ads,
+    life: flight.tech.life,
+    crs: flight.tech.crs,
+    audit: flight.tech.audit,
+    logbookNo: flight.tech.logbookNo
+  });
 }

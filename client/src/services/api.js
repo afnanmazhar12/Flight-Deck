@@ -297,5 +297,11 @@ export const api = {
     const res = await authFetch(`${BASE_URL}/radar/aircraft/${encodeURIComponent(registration)}`);
     if (!res.ok) throw new Error('Failed to fetch aircraft radar history');
     return res.json();
+  },
+
+  async getFlightHistory(registration) {
+    const res = await authFetch(`${BASE_URL}/radar/history/${encodeURIComponent(registration)}`);
+    if (!res.ok) throw new Error('Failed to fetch flight history');
+    return res.json();
   }
 };

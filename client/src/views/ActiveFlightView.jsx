@@ -5,7 +5,11 @@ import {
   getAirframeCategory,
   detectAirlineInfo,
   generateAirframeHistory,
-  generateAirframeTechData
+  generateAirframeTechData,
+  readTechBook,
+  writeTechBook,
+  persistAircraftTech,
+  isPlaceholderHours
 } from '../services/airframeTechService';
 
 const STAGES = [
@@ -101,6 +105,50 @@ function statusOf(F) {
 }
 
 
+function currentSector(next) {
+  return next.tech?.flightRows?.[0] || {
+    fltNo: next.flightNo || next.callsign || '',
+    date: next.date || new Date().toISOString().slice(0, 10),
+    dep: next.dep || '',
+    arr: next.arr || '',
+    out: next.times?.plan?.out || '',
+    off: next.times?.plan?.off || '',
+    on: next.times?.plan?.on || '',
+    in: next.times?.plan?.in || '',
+    dur: '-',
+    ldgs: '1',
+    pic: 'Capt. Afnan Mazhar',
+    remarks: 'Uplinked from SimBrief OFP (UTC)'
+  };
+}
+
+function applyTechBook(next, book, reg) {
+  next.tech.defects = book.defects || [];
+  next.tech.mel = book.mel || [];
+  next.tech.wo = book.wo || [];
+  next.tech.insp = book.insp || [];
+  next.tech.ads = book.ads || [];
+  next.tech.life = book.life || [];
+  next.tech.crs = book.crs || next.tech.crs;
+  next.tech.audit = book.audit || next.tech.audit;
+  next.tech.hdr = book.hdr || next.tech.hdr;
+  next.tech.techCategory = book.category;
+  next.tech.boundReg = reg;
+  next.tech.engine = book.engine || '';
+  next.tech.serial = book.serial || '';
+  if (!next.ac) next.ac = {};
+  if (book.serial) next.ac.serial = book.serial;
+  if (book.engine) next.ac.engine = book.engine;
+  if (book.hdr) {
+    next.ac.airframeHrs = book.hdr.afHrs;
+    next.ac.landings = book.hdr.landings;
+    next.ac.eng1Hrs = book.hdr.e1;
+    next.ac.eng2Hrs = book.hdr.e2;
+    next.ac.apuHrs = book.hdr.apu;
+  }
+  if (book.logbookNo) next.tech.logbookNo = book.logbookNo;
+}
+
 function ensureTechDefaults(f, forceRegenerate = false) {
   if (!f) return f;
   const next = JSON.parse(JSON.stringify(f));
@@ -108,54 +156,47 @@ function ensureTechDefaults(f, forceRegenerate = false) {
   const acObj = next.ac || {};
   const category = getAirframeCategory(acObj, next);
   const carrier = detectAirlineInfo(acObj, next);
+  const reg = (acObj.reg || '').toUpperCase();
+  const bound = (next.tech.boundReg || '').toUpperCase();
 
-  // Check if current flightRows past sectors are outdated/hardcoded generic placeholders
   const hasOutdatedEwg = (next.tech.flightRows || []).some(
     r => r.hist && (r.fltNo === 'EWG6892' || r.fltNo === 'EWG6839') && carrier.icao !== 'EWG'
   );
+  const histRows = (next.tech.flightRows || []).filter(r => r.hist);
+  const historyStale = forceRegenerate
+    || !next.tech.flightRows
+    || next.tech.flightRows.length <= 1
+    || hasOutdatedEwg
+    || (reg && histRows.some(r => (r.reg || '').toUpperCase() !== reg))
+    || (next.tech.historyReg && next.tech.historyReg !== reg);
 
-  const shouldRefillHistory = forceRegenerate || !next.tech.flightRows || next.tech.flightRows.length <= 1 || hasOutdatedEwg;
-
-  if (shouldRefillHistory) {
+  if (historyStale) {
     const pastSectors = generateAirframeHistory(acObj, next, 5);
-    const currentActive = next.tech?.flightRows?.[0] || {
-      fltNo: next.flightNo || next.callsign || '',
-      date: next.date || new Date().toISOString().slice(0, 10),
-      dep: next.dep || '',
-      arr: next.arr || '',
-      out: next.times?.plan?.out || '',
-      off: next.times?.plan?.off || '',
-      on: next.times?.plan?.on || '',
-      in: next.times?.plan?.in || '',
-      dur: '-',
-      ldgs: '1',
-      pic: 'Capt. Afnan Mazhar',
-      remarks: 'Uplinked from SimBrief OFP (UTC)'
-    };
-    next.tech.flightRows = [currentActive, ...pastSectors];
+    next.tech.flightRows = [currentSector(next), ...pastSectors];
+    next.tech.historyReg = reg;
+    next.tech.historySource = 'scheduled';
   }
 
-  // Check if tech documents are missing or belong to generic A320 placeholders when airframe is different
   const hasA320Placeholder = (next.tech.ads || []).some(
-    a => (a.eff || '').includes('Airbus A320-214') && category !== 'a320'
+    a => /A320-214|SB A320-27-1244/.test(a.eff || a.method || '') && category !== 'a320'
   ) || (next.tech.defects || []).some(
-    d => (d.desc || '').includes('Lav 2 smoke detector') && category !== 'a320'
+    d => /Lavatory 2 smoke detector|ELAC 1 PITCH FAULT/.test(d.desc || '') && category !== 'a320'
   );
+  const hoursLookGeneric = isPlaceholderHours(next.tech?.hdr?.afHrs) && isPlaceholderHours(acObj.airframeHrs);
+  const regChanged = !!(bound && reg && bound !== reg);
+  const missing = !next.tech.defects || next.tech.defects.length === 0;
+  const staleType = hasA320Placeholder || (next.tech.techCategory && next.tech.techCategory !== category);
 
-  if (forceRegenerate || hasA320Placeholder || !next.tech.defects || next.tech.defects.length === 0) {
-    const techData = generateAirframeTechData(acObj, next);
-    next.tech.defects = techData.defects;
-    next.tech.mel = techData.mel;
-    next.tech.wo = techData.wo;
-    next.tech.insp = techData.insp;
-    next.tech.ads = techData.ads;
-    next.tech.life = techData.life;
-    next.tech.crs = techData.crs;
-    next.tech.audit = techData.audit;
+  if (forceRegenerate || regChanged || missing || staleType || !bound || hoursLookGeneric) {
+    const saved = !forceRegenerate && reg ? readTechBook(reg) : null;
+    const savedOk = saved && saved.category === category && Array.isArray(saved.defects) && saved.defects.length;
+    const book = savedOk ? saved : generateAirframeTechData(acObj, next);
+    if (reg && !savedOk) writeTechBook(reg, book);
+    applyTechBook(next, book, reg);
   }
 
-  if (!next.tech.logbookNo) {
-    next.tech.logbookNo = `TLB-${new Date().getFullYear()}-${acObj.reg || '01'}`;
+  if (!next.tech.logbookNo || regChanged) {
+    next.tech.logbookNo = `TLB-${new Date().getFullYear()}-${reg || '01'}`;
   }
 
   return next;
@@ -179,6 +220,56 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
       setF(ensureTechDefaults(flight));
     }
   }, [flight?.id]);
+
+  useEffect(() => {
+    const reg = (F?.ac?.reg || '').toUpperCase();
+    if (!reg) return undefined;
+    let cancel = false;
+    const snapshot = F;
+    (async () => {
+      let next = (snapshot.tech?.boundReg || '').toUpperCase() === reg && snapshot.tech?.defects?.length
+        ? snapshot
+        : ensureTechDefaults(snapshot);
+      try {
+        const data = await api.getFlightHistory(reg);
+        if (!cancel && data?.sectors?.length) {
+          const base = next === snapshot ? JSON.parse(JSON.stringify(snapshot)) : next;
+          const live = (snapshot.tech?.boundReg || '').toUpperCase() === reg && snapshot.tech?.flightRows?.[0]
+            ? snapshot.tech.flightRows[0]
+            : currentSector(base);
+          base.tech.flightRows = [live, ...data.sectors.map(s => ({ ...s, hist: 1, reg }))];
+          base.tech.historyReg = reg;
+          base.tech.historySource = data.source || 'fallback';
+          next = base;
+        }
+      } catch (err) {
+        // Local sectors from ensureTechDefaults stay in place.
+      }
+      if (cancel) return;
+      persistAircraftTech(next);
+      setF(prev => {
+        if ((prev?.ac?.reg || '').toUpperCase() !== reg) return prev;
+        const merged = JSON.parse(JSON.stringify(next));
+        if ((prev.tech?.boundReg || '').toUpperCase() === reg) {
+          if (prev.tech.flightRows?.[0]) merged.tech.flightRows[0] = prev.tech.flightRows[0];
+          if (prev.tech.defects?.length) {
+            merged.tech.defects = prev.tech.defects;
+            merged.tech.mel = prev.tech.mel;
+            merged.tech.wo = prev.tech.wo;
+            merged.tech.insp = prev.tech.insp;
+            merged.tech.ads = prev.tech.ads;
+            merged.tech.life = prev.tech.life;
+            merged.tech.hdr = prev.tech.hdr || merged.tech.hdr;
+            merged.tech.crs = prev.tech.crs || merged.tech.crs;
+            merged.tech.audit = prev.tech.audit || merged.tech.audit;
+          }
+        }
+        debouncedSave(merged);
+        return merged;
+      });
+    })();
+    return () => { cancel = true; };
+  }, [F?.id, F?.ac?.reg]);
 
   useEffect(() => {
     const sbUser = F.sb?.user || localStorage.getItem('flightdesk-sbuser') || 'afnanmazhar12';
@@ -260,6 +351,7 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
     }
     const toSave = updated || pendingFlightRef.current || F;
     if (!toSave) return;
+    persistAircraftTech(toSave);
     setSaving(true);
     try {
       await api.updateFlight(toSave.id, toSave);
@@ -282,6 +374,7 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
         cur = cur[parts[i]];
       }
       cur[parts[parts.length - 1]] = val;
+      persistAircraftTech(next);
       debouncedSave(next);
       return next;
     });
@@ -561,23 +654,23 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
   };
 
   // Tech Log Actions (Airframe Specific & Flightradar24 Linked)
-  const handleRefillPastSectors = () => {
+  const handleRefillPastSectors = async () => {
+    const reg = (ac.reg || '').toUpperCase();
+    const live = F.tech?.flightRows?.[0] || currentSector(F);
+    try {
+      const data = await api.getFlightHistory(reg);
+      if (data?.sectors?.length) {
+        const next = JSON.parse(JSON.stringify(F));
+        next.tech.flightRows = [live, ...data.sectors.map(s => ({ ...s, hist: 1, reg }))];
+        next.tech.historyReg = reg;
+        next.tech.historySource = data.source || 'fallback';
+        setF(next);
+        flushSave(next);
+        return;
+      }
+    } catch (err) {}
     const pastSectors = generateAirframeHistory(ac, F, 5);
-    const currentActive = F.tech?.flightRows?.[0] || {
-      fltNo: F.flightNo || F.callsign || '',
-      date: F.date || '',
-      dep: F.dep || '',
-      arr: F.arr || '',
-      out: F.times?.plan?.out || '',
-      off: F.times?.plan?.off || '',
-      on: F.times?.plan?.on || '',
-      in: F.times?.plan?.in || '',
-      dur: '-',
-      ldgs: '1',
-      pic: 'Capt. Afnan Mazhar',
-      remarks: 'Uplinked from SimBrief OFP (UTC)'
-    };
-    updateFlightPath('tech.flightRows', [currentActive, ...pastSectors]);
+    updateFlightPath('tech.flightRows', [live, ...pastSectors]);
   };
 
   const handleRegenerateAirframeTech = () => {
@@ -1103,7 +1196,6 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
 
             {(() => {
               const carrier = detectAirlineInfo(ac, F);
-              const category = getAirframeCategory(ac, F);
               return (
                 <>
                   <div className="g">
@@ -1129,17 +1221,17 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
                     </div>
                   </div>
                   <div className="g tight">
-                    <div className="cell"><span className="lab">AIRCRAFT TYPE</span><span className="calc">{ac.typeLabel}</span></div>
-                    <div className="cell"><span className="lab">SERIAL NUMBER</span><input className="f" value={ac.serial || (category === 'b777' ? '41528' : '4152')} onChange={e => updateFlightPath('ac.serial', e.target.value)} /></div>
-                    <div className="cell"><span className="lab">ENGINE TYPE</span><input className="f" value={ac.engine || (category === 'b777' ? 'GE90-115B' : category === 'b737' ? 'CFM56-7B26' : category === 'b787' ? 'GEnx-1B' : 'CFM56-5B4')} onChange={e => updateFlightPath('ac.engine', e.target.value)} /></div>
+                    <div className="cell"><span className="lab">AIRCRAFT TYPE</span><span className="calc">{ac.typeLabel || ac.variant}</span></div>
+                    <div className="cell"><span className="lab">SERIAL NUMBER</span><input className="f" value={ac.serial || F.tech?.serial || ''} onChange={e => updateFlightPath('ac.serial', e.target.value)} /></div>
+                    <div className="cell"><span className="lab">ENGINE TYPE</span><input className="f" value={ac.engine || F.tech?.engine || ''} onChange={e => updateFlightPath('ac.engine', e.target.value)} /></div>
                     <div className="cell"><span className="lab">HOME BASE</span><input className="f up" value={ac.base || carrier.hub} onChange={e => updateFlightPath('ac.base', e.target.value.toUpperCase())} /></div>
                   </div>
                   <div className="g tight" style={{ '--min': '130px' }}>
-                    <div className="cell"><span className="lab">TOTAL AIRFRAME HOURS</span><input className="f n" value={F.tech?.hdr?.afHrs || ac.airframeHrs || '1420.5'} onChange={e => updateFlightPath('tech.hdr.afHrs', e.target.value)} /></div>
-                    <div className="cell"><span className="lab">TOTAL LANDINGS</span><input className="f n" value={F.tech?.hdr?.landings || ac.landings || '312'} onChange={e => updateFlightPath('tech.hdr.landings', e.target.value)} /></div>
-                    <div className="cell"><span className="lab">ENG #1 HOURS</span><input className="f n" value={F.tech?.hdr?.e1 || ac.eng1Hrs || '1420.5'} onChange={e => updateFlightPath('tech.hdr.e1', e.target.value)} /></div>
-                    <div className="cell"><span className="lab">ENG #2 HOURS</span><input className="f n" value={F.tech?.hdr?.e2 || ac.eng2Hrs || '1420.5'} onChange={e => updateFlightPath('tech.hdr.e2', e.target.value)} /></div>
-                    <div className="cell"><span className="lab">APU HOURS</span><input className="f n" value={F.tech?.hdr?.apu || ac.apuHrs || '1105.0'} onChange={e => updateFlightPath('tech.hdr.apu', e.target.value)} /></div>
+                    <div className="cell"><span className="lab">TOTAL AIRFRAME HOURS</span><input className="f n" value={F.tech?.hdr?.afHrs || ac.airframeHrs || ''} onChange={e => updateFlightPath('tech.hdr.afHrs', e.target.value)} /></div>
+                    <div className="cell"><span className="lab">TOTAL LANDINGS</span><input className="f n" value={F.tech?.hdr?.landings || ac.landings || ''} onChange={e => updateFlightPath('tech.hdr.landings', e.target.value)} /></div>
+                    <div className="cell"><span className="lab">ENG #1 HOURS</span><input className="f n" value={F.tech?.hdr?.e1 || ac.eng1Hrs || ''} onChange={e => updateFlightPath('tech.hdr.e1', e.target.value)} /></div>
+                    <div className="cell"><span className="lab">ENG #2 HOURS</span><input className="f n" value={F.tech?.hdr?.e2 || ac.eng2Hrs || ''} onChange={e => updateFlightPath('tech.hdr.e2', e.target.value)} /></div>
+                    <div className="cell"><span className="lab">APU HOURS</span><input className="f n" value={F.tech?.hdr?.apu || ac.apuHrs || ''} onChange={e => updateFlightPath('tech.hdr.apu', e.target.value)} /></div>
                   </div>
 
                   <div className="sh" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
@@ -1166,7 +1258,8 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
                     </div>
                   </div>
                   <p className="note" style={{ margin: '6px 0 10px' }}>
-                    Authentic route network history for {ac.reg} ({carrier.name}). Click FR24 beside any past sector to inspect its live radar data on Flightradar24.
+                    Previous sectors for {ac.reg} ({carrier.name}
+                    {F.tech?.historySource ? ` · ${F.tech.historySource}` : ''}). Open FR24 on any past sector to view that registration.
                   </p>
                   <div className="row noprint" style={{ gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
                     <button type="button" className="btn sm ghost" onClick={handleRefillPastSectors} title="Regenerate connecting previous sectors for this airline network">
@@ -1206,6 +1299,7 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
                     <th>LDGS</th>
                     <th>PILOT IN CMD</th>
                     <th>DISCREPANCY / REMARKS</th>
+                    <th>RADAR</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -1326,6 +1420,17 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
                         />
                       </td>
                       <td>
+                        <a
+                          href={row.fr24Url || row.aircraftFr24Url || `https://www.flightradar24.com/data/aircraft/${(row.reg || ac.reg || '').toLowerCase()}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="radar-tag noprint"
+                          title="View this sector on Flightradar24"
+                        >
+                          FR24 ↗
+                        </a>
+                      </td>
+                      <td>
                         {i > 0 && (
                           <button
                             type="button"
@@ -1404,10 +1509,10 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
               Certifies that the work specified, except as otherwise stated, was carried out in accordance with applicable aviation authority maintenance standards and regulations, and in respect to that work, the aircraft is considered ready for release to service.
             </p>
             <div className="g">
-              <div className="cell"><span className="lab">CERTIFYING STAFF SIGNATURE</span><input className="f" value={F.tech?.crs?.sig || 'A. Mazhar (AME)'} onChange={e => updateFlightPath('tech.crs.sig', e.target.value)} /></div>
-              <div className="cell"><span className="lab">LICENCE / CERT NUMBER</span><input className="f" value={F.tech?.crs?.lic || 'GACA-AME-88412'} onChange={e => updateFlightPath('tech.crs.lic', e.target.value)} /></div>
-              <div className="cell"><span className="lab">AMO / FACILITY REF</span><input className="f" value={F.tech?.crs?.amo || 'SAUDIA TECH-EDDL'} onChange={e => updateFlightPath('tech.crs.amo', e.target.value)} /></div>
-              <div className="cell"><span className="lab">DATE &amp; UTC TIME</span><input className="f" value={F.tech?.crs?.dt || `17 NOV 2026 1621Z`} onChange={e => updateFlightPath('tech.crs.dt', e.target.value)} /></div>
+              <div className="cell"><span className="lab">CERTIFYING STAFF SIGNATURE</span><input className="f" value={F.tech?.crs?.sig || ''} onChange={e => updateFlightPath('tech.crs.sig', e.target.value)} /></div>
+              <div className="cell"><span className="lab">LICENCE / CERT NUMBER</span><input className="f" value={F.tech?.crs?.lic || ''} onChange={e => updateFlightPath('tech.crs.lic', e.target.value)} /></div>
+              <div className="cell"><span className="lab">AMO / FACILITY REF</span><input className="f" value={F.tech?.crs?.amo || ''} onChange={e => updateFlightPath('tech.crs.amo', e.target.value)} /></div>
+              <div className="cell"><span className="lab">DATE &amp; UTC TIME</span><input className="f" value={F.tech?.crs?.dt || ''} onChange={e => updateFlightPath('tech.crs.dt', e.target.value)} /></div>
             </div>
             <div className="foot">
               <span>AIRCRAFT TECHNICAL LOGBOOK — DIGITAL COPY</span>
@@ -1423,7 +1528,7 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
                 <h2 className="dt">SECTION 2: MAINTENANCE DISCREPANCY &amp; ACTION LOG</h2>
                 <p className="ds">AIRCRAFT TECHNICAL LOGBOOK</p>
               </div>
-              <span className="dbadge">{ac.variant || 'A320-200'}</span>
+              <span className="dbadge">{ac.variant || ac.typeLabel || 'Airframe'}</span>
             </header>
 
             <div className="tw" style={{ marginTop: 12 }}>
@@ -1580,7 +1685,7 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
                 <h2 className="dt">SECTION 3: SCHEDULED INSPECTION STATUS &amp; DIRECTIVE TRACKING</h2>
                 <p className="ds">AIRCRAFT TECHNICAL LOGBOOK</p>
               </div>
-              <span className="dbadge">{ac.variant || 'A320-200'}</span>
+              <span className="dbadge">{ac.variant || ac.typeLabel || 'Airframe'}</span>
             </header>
 
             <div className="lab" style={{ marginTop: 12 }}>INSPECTION / CHECK</div>
@@ -1704,9 +1809,9 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
 
             <div className="sh">LOGBOOK AUDIT &amp; ARCHIVAL STATUS</div>
             <div className="g">
-              <div className="cell"><span className="lab">INSPECTOR SIG / STAMP</span><input className="f" value={F.tech?.audit?.sig || 'EASA Part-66 / QA-4481'} onChange={e => updateFlightPath('tech.audit.sig', e.target.value)} /></div>
-              <div className="cell"><span className="lab">QUALITY ASSURANCE APPROVAL</span><input className="f" value={F.tech?.audit?.qa || 'CERT-CRS-EDDL-2026'} onChange={e => updateFlightPath('tech.audit.qa', e.target.value)} /></div>
-              <div className="cell"><span className="lab">FACILITY CERT REF</span><input className="f" value={F.tech?.audit?.cert || 'EDDL-MRO-A320'} onChange={e => updateFlightPath('tech.audit.cert', e.target.value)} /></div>
+              <div className="cell"><span className="lab">INSPECTOR SIG / STAMP</span><input className="f" value={F.tech?.audit?.sig || ''} onChange={e => updateFlightPath('tech.audit.sig', e.target.value)} /></div>
+              <div className="cell"><span className="lab">QUALITY ASSURANCE APPROVAL</span><input className="f" value={F.tech?.audit?.qa || ''} onChange={e => updateFlightPath('tech.audit.qa', e.target.value)} /></div>
+              <div className="cell"><span className="lab">FACILITY CERT REF</span><input className="f" value={F.tech?.audit?.cert || ''} onChange={e => updateFlightPath('tech.audit.cert', e.target.value)} /></div>
             </div>
             <p className="note noprint" style={{ marginTop: 12 }}>
               Section 3 belongs to the aircraft, so these entries are shared by every flight on {ac.reg}.
