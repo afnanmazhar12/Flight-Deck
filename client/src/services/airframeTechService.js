@@ -8,6 +8,15 @@
 // 1. Airframe Category Classifier
 // -----------------------------------------------------------------------------
 export function getAirframeCategory(ac = {}, flight = {}) {
+  const reg = (ac.reg || flight.reg || (flight.ac && flight.ac.reg) || '').toUpperCase();
+  if (/HZ-AK2|HZ-AK11|A6-EPE|A6-EC/i.test(reg)) return 'b777';
+  if (/OH-NRO/i.test(reg)) return 'a320';
+  if (/D-ABYK|N408MC/i.test(reg)) return 'b747';
+  if (/G-ZBJB|N787AA/i.test(reg)) return 'b787';
+  if (/A7-ALJ/i.test(reg)) return 'a350';
+  if (/D-AIDV/i.test(reg)) return 'b737';
+  if (/D-ABNL/i.test(reg)) return 'a320';
+
   const str = [
     ac.group,
     ac.variant,
@@ -15,7 +24,15 @@ export function getAirframeCategory(ac = {}, flight = {}) {
     ac.icao,
     ac.tpl,
     ac.make,
-    flight.aircraftType
+    flight.aircraft,
+    flight.aircraftType,
+    flight.aircraftIcao,
+    flight.ac?.group,
+    flight.ac?.variant,
+    flight.ac?.typeLabel,
+    flight.ac?.icao,
+    flight.ac?.tpl,
+    flight.ac?.make
   ].filter(Boolean).join(' ').toUpperCase();
 
   if (/777|B77W|B77L|B772|B773|B77F/i.test(str)) return 'b777';
@@ -26,7 +43,10 @@ export function getAirframeCategory(ac = {}, flight = {}) {
   if (/A330|A332|A333|A339/i.test(str)) return 'a330';
   if (/A380|A388/i.test(str)) return 'a380';
   if (/320|321|319|318|A320|A321|A319|A20N|A21N/i.test(str)) return 'a320';
-  if (/CRJ|E170|E175|E190|E195|EMBRAER|BOMBARDIER|ATR|DH8D|DASH/i.test(str)) return 'regional';
+  if (/757|B752|B753/i.test(str)) return 'b757';
+  if (/767|B763|B764/i.test(str)) return 'b767';
+  if (/A220|BCS1|BCS3/i.test(str)) return 'a220';
+  if (/CRJ|E170|E175|E190|E195|E295|EMBRAER|BOMBARDIER|ATR|DH8D|DASH/i.test(str)) return 'regional';
   return 'general';
 }
 
@@ -1245,11 +1265,22 @@ export function generateAirframeTechData(ac = {}, flight = {}) {
 
 const TECH_BOOK_PREFIX = 'flightdesk-techbook:';
 
-export function readTechBook(reg) {
+export function readTechBook(reg, expectedCategory = null) {
   if (!reg || typeof localStorage === 'undefined') return null;
   try {
     const raw = localStorage.getItem(TECH_BOOK_PREFIX + String(reg).toUpperCase());
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const book = JSON.parse(raw);
+    if (!book || !Array.isArray(book.defects)) return null;
+    if (expectedCategory && book.category && book.category !== expectedCategory) {
+      return null;
+    }
+    // Purge old A320 contaminations
+    const hasA320Defects = (book.defects || []).some(d => /Lavatory 2 smoke detector|ELAC 1 PITCH FAULT/i.test(d.desc || ''));
+    if (hasA320Defects && expectedCategory && expectedCategory !== 'a320') {
+      return null;
+    }
+    return book;
   } catch (e) {
     return null;
   }
@@ -1262,6 +1293,13 @@ export function writeTechBook(reg, book) {
       ...book,
       reg: String(reg).toUpperCase()
     }));
+  } catch (e) {}
+}
+
+export function clearTechBook(reg) {
+  if (!reg || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(TECH_BOOK_PREFIX + String(reg).toUpperCase());
   } catch (e) {}
 }
 

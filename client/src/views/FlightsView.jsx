@@ -114,13 +114,15 @@ export default function FlightsView({
       const D = ofpRes.d;
       setUplinkStatus(`Uplinked: ${D.org} → ${D.dst} (${D.cs || D.fn}) · Matching aircraft...`);
 
-      // Match aircraft in fleet by ICAO or registration
+      // Match aircraft in fleet by registration first, then ICAO
       const targetIcao = (D.acft || '').toUpperCase();
       const targetReg = (D.reg || '').toUpperCase();
       const matchedAc = fleet.find(a => 
-        (a.icao && a.icao.toUpperCase() === targetIcao) ||
-        (a.tpl && a.tpl.toUpperCase() === targetIcao) ||
-        (a.reg && a.reg.toUpperCase() === targetReg)
+        (targetReg && a.reg && a.reg.toUpperCase() === targetReg)
+      ) || fleet.find(a =>
+        (targetIcao && a.icao && a.icao.toUpperCase() === targetIcao) ||
+        (targetIcao && a.tpl && a.tpl.toUpperCase() === targetIcao) ||
+        (targetIcao && (a.variant || '').toUpperCase().includes(targetIcao))
       ) || fleet[0];
 
       const basePayload = {
@@ -129,9 +131,14 @@ export default function FlightsView({
         dep: (D.org || '').toUpperCase(),
         arr: (D.dst || '').toUpperCase(),
         alt: (D.alt || '').toUpperCase(),
+        aircraft: matchedAc?.typeLabel || matchedAc?.variant || D.acft_name || D.acft,
+        aircraftType: matchedAc?.icao || D.acft,
         date: new Date().toISOString().slice(0, 10),
         network: 'VATSIM',
-        ac: matchedAc,
+        ac: matchedAc ? {
+          ...matchedAc,
+          reg: targetReg || matchedAc.reg
+        } : null,
         aircraftId: matchedAc?.id
       };
 

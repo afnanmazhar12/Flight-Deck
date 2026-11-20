@@ -8,6 +8,7 @@ import {
   generateAirframeTechData,
   readTechBook,
   writeTechBook,
+  clearTechBook,
   persistAircraftTech,
   isPlaceholderHours
 } from '../services/airframeTechService';
@@ -171,7 +172,7 @@ function ensureTechDefaults(f, forceRegenerate = false) {
     || (next.tech.historyReg && next.tech.historyReg !== reg);
 
   if (historyStale) {
-    const pastSectors = generateAirframeHistory(acObj, next, 5);
+    const pastSectors = generateAirframeHistory(acObj, next, 7);
     next.tech.flightRows = [currentSector(next), ...pastSectors];
     next.tech.historyReg = reg;
     next.tech.historySource = 'scheduled';
@@ -180,7 +181,7 @@ function ensureTechDefaults(f, forceRegenerate = false) {
   const hasA320Placeholder = (next.tech.ads || []).some(
     a => /A320-214|SB A320-27-1244/.test(a.eff || a.method || '') && category !== 'a320'
   ) || (next.tech.defects || []).some(
-    d => /Lavatory 2 smoke detector|ELAC 1 PITCH FAULT/.test(d.desc || '') && category !== 'a320'
+    d => /Lavatory 2 smoke detector|ELAC 1 PITCH FAULT/.test(d.desc || '') && (category !== 'a320' || carrier.icao !== 'EWG')
   );
   const hoursLookGeneric = isPlaceholderHours(next.tech?.hdr?.afHrs) && isPlaceholderHours(acObj.airframeHrs);
   const regChanged = !!(bound && reg && bound !== reg);
@@ -188,7 +189,7 @@ function ensureTechDefaults(f, forceRegenerate = false) {
   const staleType = hasA320Placeholder || (next.tech.techCategory && next.tech.techCategory !== category);
 
   if (forceRegenerate || regChanged || missing || staleType || !bound || hoursLookGeneric) {
-    const saved = !forceRegenerate && reg ? readTechBook(reg) : null;
+    const saved = !forceRegenerate && reg ? readTechBook(reg, category) : null;
     const savedOk = saved && saved.category === category && Array.isArray(saved.defects) && saved.defects.length;
     const book = savedOk ? saved : generateAirframeTechData(acObj, next);
     if (reg && !savedOk) writeTechBook(reg, book);
@@ -250,9 +251,17 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
       setF(prev => {
         if ((prev?.ac?.reg || '').toUpperCase() !== reg) return prev;
         const merged = JSON.parse(JSON.stringify(next));
-        if ((prev.tech?.boundReg || '').toUpperCase() === reg) {
+        const prevCat = prev.tech?.techCategory;
+        const nextCat = next.tech?.techCategory;
+        const isSameCategory = prevCat === nextCat;
+        const isSameReg = (prev.tech?.boundReg || '').toUpperCase() === reg;
+
+        if (isSameReg && isSameCategory) {
           if (prev.tech.flightRows?.[0]) merged.tech.flightRows[0] = prev.tech.flightRows[0];
-          if (prev.tech.defects?.length) {
+          const prevHasStaleDefects = (prev.tech.defects || []).some(
+            d => /Lavatory 2 smoke detector|ELAC 1 PITCH FAULT/i.test(d.desc || '') && nextCat !== 'a320'
+          );
+          if (prev.tech.defects?.length && !prevHasStaleDefects) {
             merged.tech.defects = prev.tech.defects;
             merged.tech.mel = prev.tech.mel;
             merged.tech.wo = prev.tech.wo;
@@ -669,11 +678,13 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
         return;
       }
     } catch (err) {}
-    const pastSectors = generateAirframeHistory(ac, F, 5);
+    const pastSectors = generateAirframeHistory(ac, F, 7);
     updateFlightPath('tech.flightRows', [live, ...pastSectors]);
   };
 
   const handleRegenerateAirframeTech = () => {
+    const reg = (F?.ac?.reg || '').toUpperCase();
+    if (reg) clearTechBook(reg);
     const updated = ensureTechDefaults(F, true);
     setF(updated);
     flushSave(updated);
@@ -1235,7 +1246,7 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
                   </div>
 
                   <div className="sh" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                    <span>PREVIOUS SECTORS · LAST 5 FLIGHTS ({carrier.name} · {ac.typeLabel || 'Airframe'})</span>
+                    <span>PREVIOUS SECTORS · LAST {Math.max(1, (F.tech?.flightRows || []).length - 1)} FLIGHTS ({carrier.name} · {ac.typeLabel || ac.variant || 'Airframe'})</span>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       <a 
                         href={`https://www.flightradar24.com/data/aircraft/${(ac.reg || '').toLowerCase()}`} 
@@ -1528,7 +1539,7 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
                 <h2 className="dt">SECTION 2: MAINTENANCE DISCREPANCY &amp; ACTION LOG</h2>
                 <p className="ds">AIRCRAFT TECHNICAL LOGBOOK</p>
               </div>
-              <span className="dbadge">{ac.variant || ac.typeLabel || 'Airframe'}</span>
+              <span className="dbadge">{ac.variant || ac.typeLabel || F.aircraft || 'Airframe'}</span>
             </header>
 
             <div className="tw" style={{ marginTop: 12 }}>
@@ -1685,7 +1696,7 @@ export default function ActiveFlightView({ flight, onBack, onUpdateFlight, onTra
                 <h2 className="dt">SECTION 3: SCHEDULED INSPECTION STATUS &amp; DIRECTIVE TRACKING</h2>
                 <p className="ds">AIRCRAFT TECHNICAL LOGBOOK</p>
               </div>
-              <span className="dbadge">{ac.variant || ac.typeLabel || 'Airframe'}</span>
+              <span className="dbadge">{ac.variant || ac.typeLabel || F.aircraft || 'Airframe'}</span>
             </header>
 
             <div className="lab" style={{ marginTop: 12 }}>INSPECTION / CHECK</div>

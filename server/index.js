@@ -580,7 +580,95 @@ async function seedFleetForUser(userId) {
     created: Date.now()
   };
 
-  const starter = [p1, p2, p3];
+  const p4 = {
+    id: `ac_b777_hzak2_${userId}`,
+    userId,
+    reg: 'HZ-AK2',
+    make: 'Boeing',
+    group: 'Boeing 777',
+    variant: '777-300ER',
+    typeLabel: 'Boeing 777-300ER',
+    icao: 'B77W',
+    tpl: 'b777',
+    exact: true,
+    operator: 'Saudia',
+    base: 'OEJN',
+    serial: '41528',
+    engine: 'GE90-115B',
+    config: 'F8C42Y304 / C28Y368',
+    taxiFuel: '500',
+    fuelCap: '145500',
+    limits: { mrw: '352441', mtow: '351534', mlw: '251290', mzfw: '237682' },
+    tanks: [
+      { name: 'Left Main Tank', max: '31300' },
+      { name: 'Center Main Tank', max: '82900' },
+      { name: 'Right Main Tank', max: '31300' }
+    ],
+    holds: [
+      { name: 'Hold 1 (Fwd Pallets)', limit: '25000', group: 1 },
+      { name: 'Hold 2 (Fwd Container)', limit: '21000', group: 1 },
+      { name: 'Hold 3 (Aft Container)', limit: '18000', group: 2 },
+      { name: 'Hold 4 (Aft Loose/Bulk)', limit: '3000', group: 2 }
+    ],
+    zones: [
+      { name: 'Zone A (First / Business)' },
+      { name: 'Zone B (Business / Premium)' },
+      { name: 'Zone C (Economy Fwd)' },
+      { name: 'Zone D (Economy Mid)' },
+      { name: 'Zone E (Economy Aft)' }
+    ],
+    airframeHrs: '1840.2',
+    landings: '412',
+    eng1Hrs: '1840.2',
+    eng2Hrs: '1840.2',
+    apuHrs: '1420.0',
+    created: Date.now()
+  };
+
+  const p5 = {
+    id: `ac_a321_ohnro_${userId}`,
+    userId,
+    reg: 'OH-NRO',
+    make: 'Airbus',
+    group: 'Airbus A320 family',
+    variant: 'A321-200',
+    typeLabel: 'Airbus A321-200',
+    icao: 'A321',
+    tpl: 'a320',
+    exact: true,
+    operator: 'Finnair',
+    base: 'EFHK',
+    serial: '6104',
+    engine: 'CFM56-5B3/P',
+    config: 'C16Y184 / Y209',
+    taxiFuel: '180',
+    fuelCap: '23700',
+    limits: { mrw: '97400', mtow: '97000', mlw: '79200', mzfw: '75600' },
+    tanks: [
+      { name: 'Outer + Inner Left', max: '7500' },
+      { name: 'Center Tank', max: '8700' },
+      { name: 'Inner + Outer Right', max: '7500' }
+    ],
+    holds: [
+      { name: 'Hold 1 (Fwd)', limit: '3200', group: 1 },
+      { name: 'Hold 2 (Fwd Container)', limit: '2800', group: 1 },
+      { name: 'Hold 3 (Aft Container)', limit: '2600', group: 2 },
+      { name: 'Hold 4 (Aft Bulk)', limit: '1900', group: 2 }
+    ],
+    zones: [
+      { name: 'Zone A (Business / Fwd)' },
+      { name: 'Zone B (Economy Mid)' },
+      { name: 'Zone C (Economy Aft)' }
+    ],
+    airframeHrs: '9450.0',
+    landings: '3120',
+    eng1Hrs: '9450.0',
+    eng2Hrs: '9450.0',
+    apuHrs: '6800.0',
+    created: Date.now()
+  };
+
+  const starter = [p4, p2, p1, p3, p5];
   for (const plane of starter) {
     localStore.fleet[plane.id] = plane;
     if (mongoStatus.connected) {
@@ -1725,28 +1813,19 @@ function sectorFromTimes({ fltNo, reg, dep, arr, outMs, offMs, onMs, inMs, pic, 
 }
 
 const KNOWN_TAIL_HISTORY = {
-  'D-ABNL': {
-    pic: 'Capt. Karl S.',
+  'HZ-AK2': {
+    pic: 'Capt. Tariq Al-Ghamdi',
     sectors: [
-      ['EWG9823', 'LIMC', 'EDDL', 1.3],
-      ['EWG9822', 'EDDL', 'LIMC', 1.2],
-      ['EWG6840', 'LEPA', 'EDDL', 2.0],
-      ['EWG6839', 'EDDL', 'LEPA', 2.1],
-      ['EWG1042', 'EDDM', 'EDDL', 1.1]
-    ]
-  },
-  'D-AIDV': {
-    pic: 'Capt. Tobias K.',
-    sectors: [
-      ['EWG4642', 'EDDB', 'EDDL', 1.2],
-      ['EWG4641', 'EDDL', 'EDDB', 1.2],
-      ['EWG2814', 'LEMG', 'EDDL', 2.8],
-      ['EWG2813', 'EDDL', 'LEMG', 2.9],
-      ['EWG5120', 'LOWW', 'EDDL', 1.5]
+      ['SVA1465', 'OERK', 'OEMA', 1.25],
+      ['SVA1466', 'OEMA', 'OERK', 1.15],
+      ['SVA1024', 'OEJN', 'OERK', 1.6],
+      ['SVA1025', 'OERK', 'OEJN', 1.6],
+      ['SVA112', 'EGLL', 'OEJN', 5.8],
+      ['SVA111', 'OEJN', 'EGLL', 6.2]
     ]
   },
   'HZ-AK11': {
-    pic: 'Capt. Tariq Al-Ghamdi',
+    pic: 'Capt. Fahad Al-Otaibi',
     sectors: [
       ['SVA1025', 'OERK', 'OEJN', 1.6],
       ['SVA1024', 'OEJN', 'OERK', 1.6],
@@ -1794,21 +1873,123 @@ const KNOWN_TAIL_HISTORY = {
       ['BAW015', 'EGLL', 'WSSS', 12.9],
       ['BAW107', 'EGLL', 'OMDB', 6.8]
     ]
+  },
+  'D-ABYK': {
+    pic: 'Capt. Markus Hoffmann',
+    sectors: [
+      ['DLH400', 'EDDF', 'KJFK', 8.5],
+      ['DLH401', 'KJFK', 'EDDF', 7.5],
+      ['DLH778', 'EDDF', 'WSSS', 11.9],
+      ['DLH779', 'WSSS', 'EDDF', 12.8],
+      ['DLH102', 'EDDF', 'EDDM', 0.9]
+    ]
+  },
+  'N787AA': {
+    pic: 'Capt. Michael Miller',
+    sectors: [
+      ['AAL050', 'KDFW', 'EGLL', 8.8],
+      ['AAL051', 'EGLL', 'KDFW', 9.5],
+      ['AAL1240', 'KMIA', 'KDFW', 2.9],
+      ['AAL2102', 'KLAX', 'KDFW', 3.1]
+    ]
+  },
+  'D-AIDV': {
+    pic: 'Capt. Tobias K.',
+    sectors: [
+      ['EWG4642', 'EDDB', 'EDDL', 1.2],
+      ['EWG4641', 'EDDL', 'EDDB', 1.2],
+      ['EWG2814', 'LEMG', 'EDDL', 2.8],
+      ['EWG2813', 'EDDL', 'LEMG', 2.9],
+      ['EWG5120', 'LOWW', 'EDDL', 1.5]
+    ]
+  },
+  'D-ABNL': {
+    pic: 'Capt. Karl S.',
+    sectors: [
+      ['EWG9823', 'LIMC', 'EDDL', 1.3],
+      ['EWG9822', 'EDDL', 'LIMC', 1.2],
+      ['EWG6840', 'LEPA', 'EDDL', 2.0],
+      ['EWG6839', 'EDDL', 'LEPA', 2.1],
+      ['EWG1042', 'EDDM', 'EDDL', 1.1]
+    ]
   }
 };
 
 function fallbackSectors(reg) {
-  const known = KNOWN_TAIL_HISTORY[reg];
-  const seed = historyHash(reg);
-  const generic = [
+  const cleanReg = String(reg || '').toUpperCase();
+  const known = KNOWN_TAIL_HISTORY[cleanReg];
+  const seed = historyHash(cleanReg);
+
+  let pool = null;
+  let defaultPic = 'Capt. A. Mazhar';
+
+  if (cleanReg.startsWith('HZ-')) {
+    defaultPic = 'Capt. Tariq Al-Ghamdi';
+    pool = [
+      ['SVA1024', 'OEJN', 'OERK', 1.6],
+      ['SVA1025', 'OERK', 'OEJN', 1.6],
+      ['SVA1465', 'OERK', 'OEMA', 1.25],
+      ['SVA1466', 'OEMA', 'OERK', 1.15],
+      ['SVA112', 'EGLL', 'OEJN', 5.8]
+    ];
+  } else if (cleanReg.startsWith('A6-')) {
+    defaultPic = 'Capt. A. Al-Mansoor';
+    pool = [
+      ['UAE001', 'OMDB', 'EGLL', 7.4],
+      ['UAE002', 'EGLL', 'OMDB', 6.9],
+      ['UAE201', 'OMDB', 'KJFK', 13.8],
+      ['UAE202', 'KJFK', 'OMDB', 12.4]
+    ];
+  } else if (cleanReg.startsWith('A7-')) {
+    defaultPic = 'Capt. Nasser Al-Kuwari';
+    pool = [
+      ['QTR007', 'OTHH', 'EGLL', 7.0],
+      ['QTR008', 'EGLL', 'OTHH', 6.4],
+      ['QTR701', 'OTHH', 'KJFK', 13.5],
+      ['QTR702', 'KJFK', 'OTHH', 12.2]
+    ];
+  } else if (cleanReg.startsWith('OH-')) {
+    defaultPic = 'Capt. Mikko Laine';
+    pool = [
+      ['FIN831', 'EFHK', 'ESSA', 0.9],
+      ['FIN832', 'ESSA', 'EFHK', 0.9],
+      ['FIN001', 'EFHK', 'EGLL', 3.1],
+      ['FIN002', 'EGLL', 'EFHK', 2.9]
+    ];
+  } else if (cleanReg.startsWith('G-')) {
+    defaultPic = 'Capt. James Harrison';
+    pool = [
+      ['BAW117', 'EGLL', 'KJFK', 7.6],
+      ['BAW178', 'KJFK', 'EGLL', 6.8],
+      ['BAW015', 'EGLL', 'WSSS', 12.9],
+      ['BAW107', 'EGLL', 'OMDB', 6.8]
+    ];
+  } else if (cleanReg.startsWith('N')) {
+    defaultPic = 'Capt. Michael Miller';
+    pool = [
+      ['AAL050', 'KDFW', 'EGLL', 8.8],
+      ['AAL051', 'EGLL', 'KDFW', 9.5],
+      ['AAL1240', 'KMIA', 'KDFW', 2.9],
+      ['AAL155', 'KDFW', 'KORD', 2.2]
+    ];
+  } else if (cleanReg.startsWith('D-')) {
+    defaultPic = 'Capt. Markus Hoffmann';
+    pool = [
+      ['DLH400', 'EDDF', 'KJFK', 8.5],
+      ['DLH401', 'KJFK', 'EDDF', 7.5],
+      ['DLH778', 'EDDF', 'WSSS', 11.9],
+      ['DLH900', 'EDDF', 'EGLL', 1.5]
+    ];
+  }
+
+  const rows = known ? known.sectors : (pool || [
     ['FLT101', 'EFHK', 'EGLL', 3.0],
     ['FLT102', 'EGLL', 'EFHK', 2.8],
     ['FLT221', 'EDDF', 'LFPG', 1.2],
     ['FLT222', 'LFPG', 'EDDF', 1.3],
     ['FLT310', 'OMDB', 'VABB', 3.2]
-  ];
-  const rows = known ? known.sectors : generic;
-  const pic = known ? known.pic : 'Capt. A. Mazhar';
+  ]);
+  const pic = known ? known.pic : defaultPic;
   const now = Date.now();
   return rows.map((row, i) => {
     const [flt, dep, arr, hours] = row;
@@ -1816,10 +1997,10 @@ function fallbackSectors(reg) {
     const off = start + 18 * 60000;
     const on = off + Math.round(hours * 3600000);
     const inn = on + 12 * 60000;
-    const fltNo = known ? flt : flt.replace(/(\d+)$/, (m) => String(Number(m) + (seed % 9)).padStart(m.length, '0'));
+    const fltNo = known || pool ? flt : flt.replace(/(\d+)$/, (m) => String(Number(m) + (seed % 9)).padStart(m.length, '0'));
     return sectorFromTimes({
       fltNo,
-      reg,
+      reg: cleanReg,
       dep,
       arr,
       outMs: start,
@@ -1827,7 +2008,7 @@ function fallbackSectors(reg) {
       onMs: on,
       inMs: inn,
       pic,
-      remarks: known ? `Previous sector on ${reg}` : `Scheduled sector retained for ${reg}`
+      remarks: known ? `Logged flight on ${cleanReg}` : `Connecting line sector on ${cleanReg}`
     });
   });
 }

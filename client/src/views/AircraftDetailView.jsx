@@ -1,10 +1,34 @@
 import React, { useState } from 'react';
 import { api } from '../services/api';
+import { getAircraftSpec } from '../data/presets';
 
 export default function AircraftDetailView({ aircraft, onBack, onRefreshFleet }) {
   const [acState, setAcState] = useState(aircraft);
   const [saving, setSaving] = useState(false);
   const [delArm, setDelArm] = useState(false);
+
+  const handleApplyDefaultSpecs = () => {
+    const spec = getAircraftSpec({ group: acState.group || acState.make }, { variant: acState.variant, icao: acState.icao });
+    const next = {
+      ...acState,
+      config: acState.config || spec.config,
+      engine: acState.engine || spec.defaultEngine || 'Turbofan',
+      taxiFuel: acState.taxiFuel || String(spec.taxi),
+      fuelCap: String(spec.fuelCap),
+      bew: acState.bew || String(Math.round(Number(spec.limits.mzfw) * 0.62)),
+      limits: {
+        mrw: String(spec.limits.mrw),
+        mtow: String(spec.limits.mtow),
+        mlw: String(spec.limits.mlw),
+        mzfw: String(spec.limits.mzfw)
+      },
+      tanks: (spec.tanks || []).map(t => ({ name: t.name, max: String(t.max || '') })),
+      holds: (spec.holds || []).map(h => ({ name: h.name, limit: String(h.limit || ''), group: h.group })),
+      zones: (spec.zones || []).map(z => ({ name: z.name }))
+    };
+    setAcState(next);
+    triggerSave(next);
+  };
 
   const handleChange = (path, val) => {
     const next = JSON.parse(JSON.stringify(acState));
@@ -58,7 +82,26 @@ export default function AircraftDetailView({ aircraft, onBack, onRefreshFleet })
             {A.operator || 'No operator set'} · {A.engine || ''} {A.base ? `· Base: ${A.base}` : ''}
           </p>
         </div>
-        <div className="row">
+        <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
+          <a
+            href={`https://www.flightradar24.com/data/aircraft/${(A.reg || '').toLowerCase()}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn sm ghost"
+            style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            📡 Track on FR24 ↗
+          </a>
+          {(!A.fuelCap || !A.limits?.mtow) && (
+            <button
+              type="button"
+              className="btn sm ghost"
+              onClick={handleApplyDefaultSpecs}
+              title="Populate authentic weight limits, fuel tanks, and cargo holds"
+            >
+              ⚡ Fill Standard Specs
+            </button>
+          )}
           <span className="chip ok" style={{ alignSelf: 'center' }}>
             {saving ? 'Saving...' : 'Saved to DB'}
           </span>
